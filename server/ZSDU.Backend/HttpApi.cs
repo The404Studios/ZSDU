@@ -18,13 +18,20 @@ public class HttpApi
     private readonly FriendService _friendService;
     private readonly LobbyService _lobbyService;
 
+    // Economy services
+    private readonly InventoryService _inventoryService;
+    private readonly RaidService _raidService;
+    private readonly TraderService _traderService;
+    private readonly MarketService _marketService;
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         WriteIndented = false
     };
 
-    public HttpApi(Config config, SessionRegistry registry, ServerOrchestrator orchestrator, GameService gameService)
+    public HttpApi(Config config, SessionRegistry registry, ServerOrchestrator orchestrator, GameService gameService,
+        InventoryService inventoryService, RaidService raidService, TraderService traderService, MarketService marketService)
     {
         _config = config;
         _registry = registry;
@@ -32,6 +39,10 @@ public class HttpApi
         _gameService = gameService;
         _friendService = new FriendService();
         _lobbyService = new LobbyService();
+        _inventoryService = inventoryService;
+        _raidService = raidService;
+        _traderService = traderService;
+        _marketService = marketService;
         _listener = new HttpListener();
     }
 
@@ -128,6 +139,44 @@ public class HttpApi
                 ("/lobby/status", "POST") => await HandleLobbyStatus(request),
                 ("/lobby/claim_spawn", "POST") => await HandleLobbyClaimSpawn(request),
                 ("/lobby/list", "GET") => GetLobbyList(),
+
+                // ============================================
+                // ECONOMY SYSTEM
+                // ============================================
+
+                // Auth & Character
+                ("/auth/login", "POST") => await HandleLogin(request),
+                ("/character/create", "POST") => await HandleCharacterCreate(request),
+
+                // Stash & Inventory
+                ("/stash", "GET") => await HandleGetStash(request),
+                ("/stash/move", "POST") => await HandleStashMove(request),
+                ("/stash/discard", "POST") => await HandleStashDiscard(request),
+                ("/stash/split", "POST") => await HandleStashSplit(request),
+                ("/items/defs", "GET") => GetItemDefs(),
+
+                // Raid system
+                ("/raid/prepare", "POST") => await HandleRaidPrepare(request),
+                ("/raid/cancel", "POST") => await HandleRaidCancel(request),
+
+                // Server-to-server raid endpoints
+                ("/server/raid/start", "POST") => await HandleServerRaidStart(request),
+                ("/server/raid/loadout", "GET") => HandleServerRaidLoadout(request),
+                ("/server/raid/commit", "POST") => await HandleServerRaidCommit(request),
+
+                // Traders
+                ("/traders", "GET") => await HandleGetTraders(request),
+                var (p, "GET") when p.StartsWith("/trader/catalog") => await HandleGetTraderCatalog(request, p),
+                ("/trader/buy", "POST") => await HandleTraderBuy(request),
+                ("/trader/sell", "POST") => await HandleTraderSell(request),
+
+                // Market
+                ("/market/search", "GET") => HandleMarketSearch(request),
+                var (p, "GET") when p.StartsWith("/market/listing/") => HandleGetListing(p["/market/listing/".Length..]),
+                ("/market/list", "POST") => await HandleMarketList(request),
+                ("/market/buy", "POST") => await HandleMarketBuy(request),
+                ("/market/cancel", "POST") => await HandleMarketCancel(request),
+                ("/market/my_listings", "GET") => await HandleMyListings(request),
 
                 _ => null
             };
@@ -676,6 +725,234 @@ public class HttpApi
         await response.OutputStream.WriteAsync(bytes);
         response.Close();
     }
+
+    // ============================================
+    // ECONOMY ENDPOINTS
+    // ============================================
+
+    private async Task<object> HandleLogin(HttpListenerRequest request)
+    {
+        var body = await ReadJsonAsync<LoginRequest>(request);
+        if (body == null || string.IsNullOrEmpty(body.Username))
+            return new { error = "Invalid request" };
+
+        // Simple login - create or get character by username
+        var accountId = $"acc_{body.Username.ToLower()}";
+        var character = _inventoryService.GetCharacterByAccount(accountId);
+
+        if (character == null)
+        {
+            // Auto-create character on first login
+            character = _inventoryService.CreateCharacter(accountId, body.Username);
+        }
+
+        character.LastSeen = DateTime.UtcNow;
+
+        return new
+        {
+            token = $"session_{Guid.NewGuid():N}", // Simplified session token
+            character_id = character.CharacterId,
+            name = character.Name
+        };
+    }
+
+    private async Task<object> HandleCharacterCreate(HttpListenerRequest request)
+    {
+        var body = await ReadJsonAsync<CharacterCreateRequest>(request);
+        if (body == null || string.IsNullOrEmpty(body.AccountId) || string.IsNullOrEmpty(body.Name))
+            return new { error = "Invalid request" };
+
+        var existing = _inventoryService.GetCharacterByAccount(body.AccountId);
+        if (existing != null)
+            return new { error = "Character already exists" };
+
+        var character = _inventoryService.CreateCharacter(body.AccountId, body.Name);
+        return new { character_id = character.CharacterId, name = character.Name };
+    }
+
+    private async Task<object> HandleGetStash(HttpListenerRequest request)
+    {
+        var charId = request.QueryString["character_id"];
+        if (string.IsNullOrEmpty(charId))
+            return new { error = "Missing character_id" };
+
+        return _inventoryService.GetStashSnapshot(charId);
+    }
+
+    private async Task<object> HandleStashMove(HttpListenerRequest request)
+    {
+        var body = await ReadJsonAsync<StashMoveRequest>(request);
+        if (body == null)
+            return new { error = "Invalid request" };
+
+        return _inventoryService.MoveItem(body.CharacterId, body.OpId, body.Iid, body.ToX, body.ToY, body.Rotation);
+    }
+
+    private async Task<object> HandleStashDiscard(HttpListenerRequest request)
+    {
+        var body = await ReadJsonAsync<StashDiscardRequest>(request);
+        if (body == null)
+            return new { error = "Invalid request" };
+
+        return _inventoryService.DiscardItem(body.CharacterId, body.OpId, body.Iid);
+    }
+
+    private async Task<object> HandleStashSplit(HttpListenerRequest request)
+    {
+        var body = await ReadJsonAsync<StashSplitRequest>(request);
+        if (body == null)
+            return new { error = "Invalid request" };
+
+        return _inventoryService.SplitStack(body.CharacterId, body.OpId, body.Iid, body.SplitAmount, body.ToX, body.ToY);
+    }
+
+    private object GetItemDefs()
+    {
+        return new { items = _inventoryService.GetAllItemDefs() };
+    }
+
+    // Raid endpoints
+    private async Task<object> HandleRaidPrepare(HttpListenerRequest request)
+    {
+        var body = await ReadJsonAsync<RaidPrepareRequest>(request);
+        if (body == null)
+            return new { error = "Invalid request" };
+
+        return _raidService.PrepareRaid(body.CharacterId, body.OpId, body.LobbyId, body.Loadout);
+    }
+
+    private async Task<object> HandleRaidCancel(HttpListenerRequest request)
+    {
+        var body = await ReadJsonAsync<RaidCancelRequest>(request);
+        if (body == null)
+            return new { error = "Invalid request" };
+
+        return _raidService.CancelRaid(body.CharacterId, body.RaidId);
+    }
+
+    // Server-to-server raid endpoints
+    private async Task<object> HandleServerRaidStart(HttpListenerRequest request)
+    {
+        var body = await ReadJsonAsync<ServerRaidStartRequest>(request);
+        if (body == null)
+            return new { error = "Invalid request" };
+
+        return _raidService.StartRaid(body.ServerSecret, body.RaidId, body.MatchId, body.PlayerIds);
+    }
+
+    private object HandleServerRaidLoadout(HttpListenerRequest request)
+    {
+        var serverSecret = request.QueryString["server_secret"];
+        var raidId = request.QueryString["raid_id"];
+        var characterId = request.QueryString["character_id"];
+
+        if (string.IsNullOrEmpty(serverSecret) || string.IsNullOrEmpty(raidId) || string.IsNullOrEmpty(characterId))
+            return new { error = "Missing parameters" };
+
+        return _raidService.GetRaidLoadout(serverSecret, raidId, characterId);
+    }
+
+    private async Task<object> HandleServerRaidCommit(HttpListenerRequest request)
+    {
+        var body = await ReadJsonAsync<ServerRaidCommitRequest>(request);
+        if (body == null)
+            return new { error = "Invalid request" };
+
+        return _raidService.CommitRaid(body.ServerSecret, body.RaidId, body.MatchId, body.Outcomes, body.Signature);
+    }
+
+    // Trader endpoints
+    private async Task<object> HandleGetTraders(HttpListenerRequest request)
+    {
+        var charId = request.QueryString["character_id"];
+        if (string.IsNullOrEmpty(charId))
+            return new { error = "Missing character_id" };
+
+        return _traderService.GetTraders(charId);
+    }
+
+    private async Task<object> HandleGetTraderCatalog(HttpListenerRequest request, string path)
+    {
+        var charId = request.QueryString["character_id"];
+        var traderId = request.QueryString["trader_id"];
+
+        if (string.IsNullOrEmpty(charId) || string.IsNullOrEmpty(traderId))
+            return new { error = "Missing parameters" };
+
+        return _traderService.GetTraderCatalog(traderId, charId);
+    }
+
+    private async Task<object> HandleTraderBuy(HttpListenerRequest request)
+    {
+        var body = await ReadJsonAsync<TraderBuyRequest>(request);
+        if (body == null)
+            return new { error = "Invalid request" };
+
+        return _traderService.BuyFromTrader(body.CharacterId, body.OpId, body.TraderId, body.OfferId, body.Quantity);
+    }
+
+    private async Task<object> HandleTraderSell(HttpListenerRequest request)
+    {
+        var body = await ReadJsonAsync<TraderSellRequest>(request);
+        if (body == null)
+            return new { error = "Invalid request" };
+
+        return _traderService.SellToTrader(body.CharacterId, body.OpId, body.TraderId, body.Iid, body.Quantity);
+    }
+
+    // Market endpoints
+    private object HandleMarketSearch(HttpListenerRequest request)
+    {
+        var query = request.QueryString["query"];
+        var category = request.QueryString["category"];
+        long? minPrice = long.TryParse(request.QueryString["min_price"], out var minP) ? minP : null;
+        long? maxPrice = long.TryParse(request.QueryString["max_price"], out var maxP) ? maxP : null;
+        int.TryParse(request.QueryString["limit"], out var limit);
+        int.TryParse(request.QueryString["offset"], out var offset);
+
+        return _marketService.SearchListings(query, category, minPrice, maxPrice, limit > 0 ? limit : 50, offset);
+    }
+
+    private object HandleGetListing(string listingId)
+    {
+        return _marketService.GetListing(listingId);
+    }
+
+    private async Task<object> HandleMarketList(HttpListenerRequest request)
+    {
+        var body = await ReadJsonAsync<MarketListRequest>(request);
+        if (body == null)
+            return new { error = "Invalid request" };
+
+        return _marketService.CreateListing(body.CharacterId, body.OpId, body.Iid, body.Price, body.DurationHours);
+    }
+
+    private async Task<object> HandleMarketBuy(HttpListenerRequest request)
+    {
+        var body = await ReadJsonAsync<MarketBuyRequest>(request);
+        if (body == null)
+            return new { error = "Invalid request" };
+
+        return _marketService.BuyListing(body.CharacterId, body.OpId, body.ListingId);
+    }
+
+    private async Task<object> HandleMarketCancel(HttpListenerRequest request)
+    {
+        var body = await ReadJsonAsync<MarketCancelRequest>(request);
+        if (body == null)
+            return new { error = "Invalid request" };
+
+        return _marketService.CancelListing(body.CharacterId, body.ListingId);
+    }
+
+    private async Task<object> HandleMyListings(HttpListenerRequest request)
+    {
+        var charId = request.QueryString["character_id"];
+        if (string.IsNullOrEmpty(charId))
+            return new { error = "Missing character_id" };
+
+        return _marketService.GetMyListings(charId);
+    }
 }
 
 // ============================================
@@ -783,4 +1060,118 @@ public class LobbyClaimSpawnRequest
 {
     public string LobbyId { get; set; } = "";
     public string PlayerId { get; set; } = "";
+}
+
+// ============================================
+// ECONOMY REQUEST MODELS
+// ============================================
+
+public class LoginRequest
+{
+    public string Username { get; set; } = "";
+    public string? Password { get; set; }
+}
+
+public class CharacterCreateRequest
+{
+    public string AccountId { get; set; } = "";
+    public string Name { get; set; } = "";
+}
+
+public class StashMoveRequest
+{
+    public string CharacterId { get; set; } = "";
+    public string OpId { get; set; } = "";
+    public string Iid { get; set; } = "";
+    public int ToX { get; set; }
+    public int ToY { get; set; }
+    public int Rotation { get; set; } = 0;
+}
+
+public class StashDiscardRequest
+{
+    public string CharacterId { get; set; } = "";
+    public string OpId { get; set; } = "";
+    public string Iid { get; set; } = "";
+}
+
+public class StashSplitRequest
+{
+    public string CharacterId { get; set; } = "";
+    public string OpId { get; set; } = "";
+    public string Iid { get; set; } = "";
+    public int SplitAmount { get; set; }
+    public int ToX { get; set; }
+    public int ToY { get; set; }
+}
+
+public class RaidPrepareRequest
+{
+    public string CharacterId { get; set; } = "";
+    public string OpId { get; set; } = "";
+    public string LobbyId { get; set; } = "";
+    public ZSDU.Backend.Models.LoadoutSlots Loadout { get; set; } = new();
+}
+
+public class RaidCancelRequest
+{
+    public string CharacterId { get; set; } = "";
+    public string RaidId { get; set; } = "";
+}
+
+public class ServerRaidStartRequest
+{
+    public string ServerSecret { get; set; } = "";
+    public string RaidId { get; set; } = "";
+    public string MatchId { get; set; } = "";
+    public List<string> PlayerIds { get; set; } = new();
+}
+
+public class ServerRaidCommitRequest
+{
+    public string ServerSecret { get; set; } = "";
+    public string RaidId { get; set; } = "";
+    public string MatchId { get; set; } = "";
+    public List<ZSDU.Backend.Models.RaidOutcome> Outcomes { get; set; } = new();
+    public string Signature { get; set; } = "";
+}
+
+public class TraderBuyRequest
+{
+    public string CharacterId { get; set; } = "";
+    public string OpId { get; set; } = "";
+    public string TraderId { get; set; } = "";
+    public string OfferId { get; set; } = "";
+    public int Quantity { get; set; } = 1;
+}
+
+public class TraderSellRequest
+{
+    public string CharacterId { get; set; } = "";
+    public string OpId { get; set; } = "";
+    public string TraderId { get; set; } = "";
+    public string Iid { get; set; } = "";
+    public int? Quantity { get; set; }
+}
+
+public class MarketListRequest
+{
+    public string CharacterId { get; set; } = "";
+    public string OpId { get; set; } = "";
+    public string Iid { get; set; } = "";
+    public long Price { get; set; }
+    public int DurationHours { get; set; } = 24;
+}
+
+public class MarketBuyRequest
+{
+    public string CharacterId { get; set; } = "";
+    public string OpId { get; set; } = "";
+    public string ListingId { get; set; } = "";
+}
+
+public class MarketCancelRequest
+{
+    public string CharacterId { get; set; } = "";
+    public string ListingId { get; set; } = "";
 }

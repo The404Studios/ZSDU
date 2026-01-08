@@ -51,7 +51,15 @@ class Program
         var sessionRegistry = new SessionRegistry();
         var orchestrator = new ServerOrchestrator(config, sessionRegistry);
         var gameService = new GameService(sessionRegistry);
-        var httpApi = new HttpApi(config, sessionRegistry, orchestrator, gameService);
+
+        // Economy services
+        var inventoryService = new InventoryService();
+        var raidService = new RaidService(inventoryService, config.ServerSecret);
+        var traderService = new TraderService(inventoryService);
+        var marketService = new MarketService(inventoryService);
+
+        var httpApi = new HttpApi(config, sessionRegistry, orchestrator, gameService,
+            inventoryService, raidService, traderService, marketService);
         var traversal = new TraversalServer(config, sessionRegistry);
 
         try
@@ -115,6 +123,9 @@ public class Config
     // Public host address that clients connect to (single source of truth)
     public string PublicHost { get; set; } = "162.248.94.149";
 
+    // Server-to-server authentication secret (for raid commits)
+    public string ServerSecret { get; set; } = "zsdu_server_secret_change_in_production";
+
     // ============================================
     // LOCKED HEARTBEAT CONSTANTS (match Godot side)
     // ============================================
@@ -148,6 +159,10 @@ public class Config
         var publicHost = Environment.GetEnvironmentVariable("PUBLIC_HOST");
         if (!string.IsNullOrEmpty(publicHost))
             config.PublicHost = publicHost;
+
+        var serverSecret = Environment.GetEnvironmentVariable("SERVER_SECRET");
+        if (!string.IsNullOrEmpty(serverSecret))
+            config.ServerSecret = serverSecret;
 
         return config;
     }
