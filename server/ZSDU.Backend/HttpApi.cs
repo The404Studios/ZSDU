@@ -261,7 +261,7 @@ public class HttpApi
                 {
                     matchId = existingMatch.Id,
                     status = "already_matched",
-                    serverHost = "162.248.94.149",  // Production server
+                    serverHost = _config.PublicHost,
                     serverPort = existingServer?.Port ?? 0
                 };
             }
@@ -309,7 +309,7 @@ public class HttpApi
         {
             matchId = match.Id,
             status = "matched",
-            serverHost = "162.248.94.149",  // Production server
+            serverHost = _config.PublicHost,
             serverPort = server.Port,
             gameMode = match.GameMode
         };

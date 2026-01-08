@@ -180,7 +180,7 @@ func start_game() -> void:
 		return
 
 	# Server info returned
-	var server_host: String = result.get("serverHost", BACKEND_HOST)
+	var server_host: String = result.get("serverHost", BackendConfig.get_game_server_host())
 	var server_port: int = result.get("serverPort", 27015)
 
 	# Start countdown
@@ -262,7 +262,7 @@ func _poll_lobby_updates() -> void:
 
 	# Check for game start
 	if new_lobby.get("state") == "starting":
-		var server_host: String = new_lobby.get("serverHost", BACKEND_HOST)
+		var server_host: String = new_lobby.get("serverHost", BackendConfig.get_game_server_host())
 		var server_port: int = new_lobby.get("serverPort", 27015)
 		current_state = LobbyState.STARTING
 		_start_countdown(server_host, server_port)
