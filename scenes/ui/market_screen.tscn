@@ -1,0 +1,215 @@
+[gd_scene load_steps=2 format=3 uid="uid://dmarket_screen"]
+
+[ext_resource type="Script" path="res://scripts/ui/stash/market_screen.gd" id="1_market"]
+
+[node name="MarketScreen" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_market")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.06, 0.08, 0.1, 0.95)
+
+[node name="MarginContainer" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 20
+theme_override_constants/margin_top = 20
+theme_override_constants/margin_right = 20
+theme_override_constants/margin_bottom = 20
+
+[node name="HBoxContainer" type="HBoxContainer" parent="MarginContainer"]
+layout_mode = 2
+theme_override_constants/separation = 15
+
+[node name="BrowsePanel" type="VBoxContainer" parent="MarginContainer/HBoxContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_stretch_ratio = 2.0
+theme_override_constants/separation = 10
+
+[node name="TitleLabel" type="Label" parent="MarginContainer/HBoxContainer/BrowsePanel"]
+layout_mode = 2
+text = "FLEA MARKET"
+horizontal_alignment = 1
+
+[node name="Separator1" type="HSeparator" parent="MarginContainer/HBoxContainer/BrowsePanel"]
+layout_mode = 2
+
+[node name="SearchContainer" type="HBoxContainer" parent="MarginContainer/HBoxContainer/BrowsePanel"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="SearchInput" type="LineEdit" parent="MarginContainer/HBoxContainer/BrowsePanel/SearchContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "Search items..."
+
+[node name="CategoryOption" type="OptionButton" parent="MarginContainer/HBoxContainer/BrowsePanel/SearchContainer"]
+custom_minimum_size = Vector2(120, 0)
+layout_mode = 2
+
+[node name="SearchButton" type="Button" parent="MarginContainer/HBoxContainer/BrowsePanel/SearchContainer"]
+custom_minimum_size = Vector2(80, 0)
+layout_mode = 2
+text = "Search"
+
+[node name="RefreshButton" type="Button" parent="MarginContainer/HBoxContainer/BrowsePanel/SearchContainer"]
+custom_minimum_size = Vector2(80, 0)
+layout_mode = 2
+text = "Refresh"
+
+[node name="Separator2" type="HSeparator" parent="MarginContainer/HBoxContainer/BrowsePanel"]
+layout_mode = 2
+
+[node name="ListingsHeader" type="HBoxContainer" parent="MarginContainer/HBoxContainer/BrowsePanel"]
+layout_mode = 2
+
+[node name="ItemHeader" type="Label" parent="MarginContainer/HBoxContainer/BrowsePanel/ListingsHeader"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Item"
+
+[node name="SellerHeader" type="Label" parent="MarginContainer/HBoxContainer/BrowsePanel/ListingsHeader"]
+custom_minimum_size = Vector2(80, 0)
+layout_mode = 2
+text = "Seller"
+
+[node name="PriceHeader" type="Label" parent="MarginContainer/HBoxContainer/BrowsePanel/ListingsHeader"]
+custom_minimum_size = Vector2(100, 0)
+layout_mode = 2
+text = "Price"
+horizontal_alignment = 2
+
+[node name="ActionHeader" type="Label" parent="MarginContainer/HBoxContainer/BrowsePanel/ListingsHeader"]
+custom_minimum_size = Vector2(60, 0)
+layout_mode = 2
+text = ""
+
+[node name="ScrollContainer" type="ScrollContainer" parent="MarginContainer/HBoxContainer/BrowsePanel"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="ListingsContainer" type="VBoxContainer" parent="MarginContainer/HBoxContainer/BrowsePanel/ScrollContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 5
+
+[node name="SellPanel" type="VBoxContainer" parent="MarginContainer/HBoxContainer"]
+custom_minimum_size = Vector2(320, 0)
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="SellLabel" type="Label" parent="MarginContainer/HBoxContainer/SellPanel"]
+layout_mode = 2
+text = "CREATE LISTING"
+horizontal_alignment = 1
+
+[node name="Separator1" type="HSeparator" parent="MarginContainer/HBoxContainer/SellPanel"]
+layout_mode = 2
+
+[node name="WalletContainer" type="HBoxContainer" parent="MarginContainer/HBoxContainer/SellPanel"]
+layout_mode = 2
+
+[node name="WalletIcon" type="Label" parent="MarginContainer/HBoxContainer/SellPanel/WalletContainer"]
+layout_mode = 2
+text = "Gold:"
+
+[node name="GoldLabel" type="Label" parent="MarginContainer/HBoxContainer/SellPanel/WalletContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "0"
+horizontal_alignment = 2
+
+[node name="Separator2" type="HSeparator" parent="MarginContainer/HBoxContainer/SellPanel"]
+layout_mode = 2
+
+[node name="SelectItemLabel" type="Label" parent="MarginContainer/HBoxContainer/SellPanel"]
+layout_mode = 2
+text = "Select item to sell:"
+
+[node name="SellItemList" type="ItemList" parent="MarginContainer/HBoxContainer/SellPanel"]
+custom_minimum_size = Vector2(0, 150)
+layout_mode = 2
+
+[node name="PriceContainer" type="HBoxContainer" parent="MarginContainer/HBoxContainer/SellPanel"]
+layout_mode = 2
+
+[node name="PriceLabel" type="Label" parent="MarginContainer/HBoxContainer/SellPanel/PriceContainer"]
+layout_mode = 2
+text = "Price:"
+
+[node name="PriceInput" type="SpinBox" parent="MarginContainer/HBoxContainer/SellPanel/PriceContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+min_value = 1.0
+max_value = 999999.0
+value = 100.0
+
+[node name="ListButton" type="Button" parent="MarginContainer/HBoxContainer/SellPanel"]
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+disabled = true
+text = "List for Sale"
+
+[node name="Separator3" type="HSeparator" parent="MarginContainer/HBoxContainer/SellPanel"]
+layout_mode = 2
+
+[node name="MyListingsLabel" type="Label" parent="MarginContainer/HBoxContainer/SellPanel"]
+layout_mode = 2
+text = "My Listings (click to cancel):"
+
+[node name="MyListingsList" type="ItemList" parent="MarginContainer/HBoxContainer/SellPanel"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="Separator4" type="HSeparator" parent="MarginContainer/HBoxContainer/SellPanel"]
+layout_mode = 2
+
+[node name="StatusLabel" type="Label" parent="MarginContainer/HBoxContainer/SellPanel"]
+layout_mode = 2
+text = ""
+horizontal_alignment = 1
+
+[node name="NavContainer" type="HBoxContainer" parent="MarginContainer/HBoxContainer/SellPanel"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="StashButton" type="Button" parent="MarginContainer/HBoxContainer/SellPanel/NavContainer"]
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Stash"
+
+[node name="TradersButton" type="Button" parent="MarginContainer/HBoxContainer/SellPanel/NavContainer"]
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Traders"
+
+[node name="CloseButton" type="Button" parent="MarginContainer/HBoxContainer/SellPanel/NavContainer"]
+custom_minimum_size = Vector2(0, 40)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Close"
+
+[connection signal="pressed" from="MarginContainer/HBoxContainer/BrowsePanel/SearchContainer/SearchButton" to="." method="_on_search_button_pressed"]
+[connection signal="pressed" from="MarginContainer/HBoxContainer/BrowsePanel/SearchContainer/RefreshButton" to="." method="_on_refresh_button_pressed"]
+[connection signal="pressed" from="MarginContainer/HBoxContainer/SellPanel/ListButton" to="." method="_on_list_button_pressed"]
+[connection signal="pressed" from="MarginContainer/HBoxContainer/SellPanel/NavContainer/StashButton" to="." method="_on_stash_button_pressed"]
+[connection signal="pressed" from="MarginContainer/HBoxContainer/SellPanel/NavContainer/TradersButton" to="." method="_on_traders_button_pressed"]
+[connection signal="pressed" from="MarginContainer/HBoxContainer/SellPanel/NavContainer/CloseButton" to="." method="_on_close_button_pressed"]
