@@ -112,6 +112,9 @@ public class Config
     public string GodotProjectPath { get; set; } = "";
     public int MinReadyServers { get; set; } = 1;
 
+    // Public host address that clients connect to (single source of truth)
+    public string PublicHost { get; set; } = "162.248.94.149";
+
     // ============================================
     // LOCKED HEARTBEAT CONSTANTS (match Godot side)
     // ============================================
@@ -141,6 +144,10 @@ public class Config
         var projectPath = Environment.GetEnvironmentVariable("GODOT_PROJECT_PATH");
         if (!string.IsNullOrEmpty(projectPath))
             config.GodotProjectPath = projectPath;
+
+        var publicHost = Environment.GetEnvironmentVariable("PUBLIC_HOST");
+        if (!string.IsNullOrEmpty(publicHost))
+            config.PublicHost = publicHost;
 
         return config;
     }

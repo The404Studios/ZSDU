@@ -311,9 +311,13 @@ func _on_connected_to_server() -> void:
 	if LobbySystem:
 		lobby_id = LobbySystem.get_lobby_id()
 
-	# Request registration - server will determine spawn based on lobby_id
-	# Server is authoritative for spawn assignment
-	_request_registration.rpc_id(1, player_name, player_id, lobby_id)
+	# Request registration with dictionary payload (future-proof)
+	# Server is 100% authoritative for spawn assignment - client sends NO spawn info
+	_request_registration.rpc_id(1, {
+		"player_id": player_id,
+		"player_name": player_name,
+		"lobby_id": lobby_id
+	})
 
 
 func _on_connection_failed() -> void:
@@ -490,32 +494,39 @@ func _serialize_nails() -> Array:
 # RPCs
 # ============================================
 
+## Client registration RPC - uses dictionary payload for future-proofing
+## Server is 100% authoritative for spawn assignment
 @rpc("any_peer", "reliable")
-func _request_registration(username: String, player_id: String = "", lobby_id: String = "") -> void:
+func _request_registration(client_info: Dictionary) -> void:
 	if not is_authority():
 		return
 
 	var sender_id := multiplayer.get_remote_sender_id()
 
+	# Extract client-provided info (identity only, NO spawn data accepted)
+	var player_id: String = client_info.get("player_id", "")
+	var player_name: String = client_info.get("player_name", "Player_%d" % sender_id)
+	var lobby_id: String = client_info.get("lobby_id", "")
+
 	# Register player for spawn lookup
-	# Server will claim spawn from backend when spawning
+	# Server will claim spawn from backend - client has NO say in spawn position
 	if HeadlessServer and HeadlessServer.is_headless:
 		HeadlessServer.player_spawn_registry[sender_id] = {
 			"player_id": player_id,
 			"lobby_id": lobby_id,
-			"group": "",  # Will be set by server after claiming spawn
-			"index": -1   # Will be set by server after claiming spawn
+			"group": "",   # Server-authoritative: set by backend only
+			"index": -1    # Server-authoritative: set by backend only
 		}
 		print("[Server] Registered player peer %d: player=%s, lobby=%s" % [
 			sender_id, player_id, lobby_id
 		])
 
-		# Async: Claim spawn from backend (fire and forget, will be ready when player spawns)
+		# Claim spawn from backend (server-authoritative)
 		if lobby_id != "" and player_id != "":
 			_claim_spawn_async(sender_id, player_id, lobby_id)
 
-	_register_player(sender_id, username)
-	_confirm_registration.rpc_id(sender_id, sender_id, username)
+	_register_player(sender_id, player_name)
+	_confirm_registration.rpc_id(sender_id, sender_id, player_name)
 
 
 ## Claim spawn assignment from backend (server-only)

@@ -84,8 +84,8 @@ func create_lobby(lobby_name: String, max_players: int = 4, game_mode: String = 
 		lobby_error.emit(result.error)
 		return
 
-	# API returns lobby data at root level
-	current_lobby = result
+	# API always returns { lobby: {...} }
+	current_lobby = result.get("lobby", {})
 	is_leader = true
 	current_state = LobbyState.IN_LOBBY
 
@@ -112,8 +112,8 @@ func join_lobby(lobby_id: String) -> void:
 		lobby_error.emit(result.error)
 		return
 
-	# API returns lobby data at root level
-	current_lobby = result
+	# API always returns { lobby: {...} }
+	current_lobby = result.get("lobby", {})
 	is_leader = current_lobby.get("leaderId") == FriendSystem.get_player_id()
 	current_state = LobbyState.IN_LOBBY
 
@@ -230,8 +230,8 @@ func _poll_lobby_updates() -> void:
 	if result.has("error"):
 		return
 
-	# API returns lobby data at root level
-	var new_lobby: Dictionary = result
+	# API always returns { lobby: {...} }
+	var new_lobby: Dictionary = result.get("lobby", {})
 
 	# Check for player changes
 	var old_players: Array = current_lobby.get("players", [])
