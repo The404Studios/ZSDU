@@ -57,12 +57,21 @@ func initialize(p_body: CharacterBody3D, p_peer_id: int) -> void:
 	if not is_local_player:
 		interpolator = NetworkInterpolator.new()
 
-	# Get sibling controllers
-	movement_controller = body.get_node_or_null("MovementController")
-	combat_controller = body.get_node_or_null("CombatController")
-	animation_controller = body.get_node_or_null("AnimationController")
-	inventory_runtime = body.get_node_or_null("InventoryRuntime")
-	camera_pivot = body.get_node_or_null("CameraPivot")
+	# Get controllers from PlayerController member variables (more reliable than node lookup)
+	var player := body as PlayerController
+	if player:
+		movement_controller = player.movement_controller
+		combat_controller = player.combat_controller
+		animation_controller = player.animation_controller
+		inventory_runtime = player.inventory_runtime
+		camera_pivot = player.camera_pivot
+	else:
+		# Fallback to node lookup
+		movement_controller = body.get_node_or_null("MovementController")
+		combat_controller = body.get_node_or_null("CombatController")
+		animation_controller = body.get_node_or_null("AnimationController")
+		inventory_runtime = body.get_node_or_null("InventoryRuntime")
+		camera_pivot = body.get_node_or_null("CameraPivot")
 
 	# Connect signals
 	if combat_controller:
@@ -308,7 +317,7 @@ func _on_reload_requested() -> void:
 
 ## Send action to server
 func _send_action_to_server(action_type: String, data: Dictionary) -> void:
-	NetworkManager.send_action_request.rpc_id(1, action_type, data)
+	NetworkManager.request_action.rpc_id(1, action_type, data)
 
 
 ## Server validates fire action

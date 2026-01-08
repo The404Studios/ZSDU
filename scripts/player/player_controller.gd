@@ -151,9 +151,9 @@ func _physics_process(delta: float) -> void:
 	# Network controller handles all the tick logic based on authority
 	# Movement and combat are processed there
 
-	# Handle hammer input (local player only)
+	# Handle local input (props and hammer)
 	if is_local_player:
-		_process_hammer_input()
+		_process_local_input()
 
 	# Update animation from movement state
 	if animation_controller and movement_controller:
@@ -165,24 +165,28 @@ func _physics_process(delta: float) -> void:
 		)
 
 
-## Process hammer input (barricading tool)
-func _process_hammer_input() -> void:
-	# Check if we have a hammer equipped
-	var hammer: Hammer = get_meta("hammer") if has_meta("hammer") else null
-	if not hammer:
-		return
+## Process all local input (props and hammer)
+func _process_local_input() -> void:
+	# Handle interact key (E) - prop pickup/drop
+	if Input.is_action_just_pressed("interact"):
+		if prop_handler:
+			prop_handler.handle_interact()
 
-	# Check if we're not holding a prop (prop handler takes priority)
+	# If holding a prop, prop_handler takes priority for primary/secondary actions
 	if prop_handler and prop_handler.is_holding:
+		if Input.is_action_just_pressed("primary_action"):
+			prop_handler.handle_primary_action()  # Nail placement
+		if Input.is_action_just_pressed("secondary_action"):
+			prop_handler.handle_secondary_action()  # Throw
 		return
 
-	# Primary action - place nail or swing
-	if Input.is_action_just_pressed("primary_action"):
-		hammer.primary_action()
-
-	# Secondary action - repair nail
-	if Input.is_action_just_pressed("secondary_action"):
-		hammer.secondary_action()
+	# Not holding prop - hammer handles primary/secondary
+	var hammer: Hammer = get_meta("hammer") if has_meta("hammer") else null
+	if hammer:
+		if Input.is_action_just_pressed("primary_action"):
+			hammer.primary_action()  # Place nail or swing
+		if Input.is_action_just_pressed("secondary_action"):
+			hammer.secondary_action()  # Repair nail
 
 
 ## Initialize loadout from RaidManager (called when raid starts)

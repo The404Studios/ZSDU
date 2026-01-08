@@ -69,7 +69,7 @@ func register_raid(peer_id: int, raid_id: String, character_id: String, loadout_
 
 
 ## Client RPC to register raid with server
-@rpc("any_peer", "call_remote", "reliable")
+@rpc("any_peer", "reliable")
 func rpc_register_raid(raid_id: String, character_id: String, loadout_iids: Array) -> void:
 	if not NetworkManager.is_authority():
 		return
@@ -133,7 +133,7 @@ func on_player_extract(peer_id: int) -> void:
 
 
 ## Server RPC called when player reaches extraction
-@rpc("any_peer", "call_remote", "reliable")
+@rpc("any_peer", "reliable")
 func rpc_request_extract() -> void:
 	if not NetworkManager.is_authority():
 		return
