@@ -110,8 +110,15 @@ public class Config
     public int PlayersPerServer { get; set; } = 32;
     public string GodotServerPath { get; set; } = "godot_server.exe";
     public string GodotProjectPath { get; set; } = "";
-    public int HeartbeatTimeoutSeconds { get; set; } = 30;
     public int MinReadyServers { get; set; } = 1;
+
+    // ============================================
+    // LOCKED HEARTBEAT CONSTANTS (match Godot side)
+    // ============================================
+    // Godot sends heartbeat every 2 seconds
+    // Backend marks server dead after 6 seconds (3 missed heartbeats)
+    public const int HeartbeatIntervalSeconds = 2;   // DO NOT CHANGE
+    public const int HeartbeatTimeoutSeconds = 6;    // DO NOT CHANGE
 
     public static Config Load()
     {

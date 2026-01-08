@@ -181,12 +181,13 @@ public class ServerOrchestrator
 
     private void CheckHeartbeats()
     {
-        var timeout = TimeSpan.FromSeconds(_config.HeartbeatTimeoutSeconds);
+        // Use locked constant from Config (6 seconds = 3 missed heartbeats)
+        var timeout = TimeSpan.FromSeconds(Config.HeartbeatTimeoutSeconds);
         var timedOut = _registry.GetTimedOutServers(timeout);
 
         foreach (var serverId in timedOut)
         {
-            Console.WriteLine($"[Orchestrator] Server timed out: {serverId}");
+            Console.WriteLine($"[Orchestrator] Server timed out (no heartbeat for {Config.HeartbeatTimeoutSeconds}s): {serverId}");
             TerminateServer(serverId, "heartbeat_timeout");
         }
     }

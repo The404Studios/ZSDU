@@ -1,12 +1,13 @@
 extends Node
-## GameManagerClient - Connects to the Game Manager HTTP/WebSocket API
+## GameManagerClient - Connects to the Backend HTTP API
 ##
 ## Provides:
-## - HTTP API calls for session management, matchmaking, server list
-## - WebSocket connection for real-time updates
-## - Automatic reconnection and heartbeat
+## - Simple /match/find for quick matchmaking
+## - Server list via /servers
+## - Status checks via /status
 ##
-## This complements TraversalClient for full infrastructure support.
+## This is the primary matchmaking client for production use.
+## TraversalClient is for session discovery/legacy support.
 
 signal authenticated(session_id: String)
 signal match_found(server_info: Dictionary)
@@ -121,19 +122,91 @@ func get_status() -> Dictionary:
 	return await _http_request_async(HTTPClient.METHOD_GET, "/status")
 
 
-## Get server list
+## Get server list (from backend /servers endpoint)
 func get_servers() -> Array:
-	var result = await _http_request_async(HTTPClient.METHOD_GET, "/api/servers")
+	var result = await _http_request_async(HTTPClient.METHOD_GET, "/servers")
 	if result.has("error"):
 		connection_error.emit(result.error)
 		return []
 
-	var servers: Array = result if result is Array else []
+	# Result might be wrapped or direct array
+	var servers: Array = []
+	if result is Array:
+		servers = result
+	elif result.has("data") and result.data is Array:
+		servers = result.data
+
 	server_list_received.emit(servers)
 	return servers
 
 
-## Create player session
+# ============================================
+# SIMPLE MATCHMAKING (MVP)
+# ============================================
+
+## Find a match - The primary matchmaking function
+## Calls POST /match/find and returns server connection info
+## Returns: { matchId, status, serverHost, serverPort, gameMode } or { error }
+func find_match(p_player_id: String, game_mode: String = "survival") -> Dictionary:
+	print("[GameManager] Finding match for player: %s (mode: %s)" % [p_player_id, game_mode])
+
+	var result = await _http_request_async(HTTPClient.METHOD_POST, "/match/find", {
+		"playerId": p_player_id,
+		"gameMode": game_mode
+	})
+
+	if result.has("error"):
+		connection_error.emit(result.error)
+		return result
+
+	var status: String = result.get("status", "unknown")
+
+	match status:
+		"matched", "already_matched":
+			print("[GameManager] Match found: %s on %s:%d" % [
+				result.get("matchId", "?"),
+				result.get("serverHost", "?"),
+				result.get("serverPort", 0)
+			])
+			match_found.emit({
+				"match_id": result.get("matchId", ""),
+				"host": result.get("serverHost", "127.0.0.1"),
+				"port": result.get("serverPort", 27015),
+				"game_mode": result.get("gameMode", "survival")
+			})
+
+		"unavailable":
+			print("[GameManager] No servers available")
+			connection_error.emit("No servers available")
+
+		"error":
+			print("[GameManager] Matchmaking error: %s" % result.get("error", "unknown"))
+			connection_error.emit(result.get("error", "Matchmaking failed"))
+
+	return result
+
+
+## Quick play - Find match and connect automatically
+func quick_play(p_player_id: String, game_mode: String = "survival") -> void:
+	var result = await find_match(p_player_id, game_mode)
+
+	if result.has("error"):
+		return
+
+	var status: String = result.get("status", "")
+	if status in ["matched", "already_matched"]:
+		var host: String = result.get("serverHost", "127.0.0.1")
+		var port: int = result.get("serverPort", 27015)
+
+		print("[GameManager] Quick play connecting to %s:%d" % [host, port])
+		NetworkManager.join_server(host, port)
+
+
+# ============================================
+# LEGACY MATCHMAKING (for complex flows)
+# ============================================
+
+## Create player session (legacy - not needed for simple /match/find)
 func create_session(p_player_id: String, p_player_name: String) -> Dictionary:
 	player_id = p_player_id
 	player_name = p_player_name
