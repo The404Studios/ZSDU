@@ -22,7 +22,7 @@ signal shutting_down(reason: String)
 # CONFIGURATION (from cmdline or environment)
 # ============================================
 var game_port: int = 27015
-var backend_url: String = "http://127.0.0.1:8080"
+var backend_url: String = "http://162.248.94.149:8080"  # Production server
 var session_id: String = ""
 var is_headless: bool = false
 

@@ -25,6 +25,7 @@ GameState="*res://scripts/autoload/game_state.gd"
 PhysicsThrottle="*res://scripts/autoload/physics_throttle.gd"
 GameManagerClient="*res://scripts/autoload/game_manager_client.gd"
 HeadlessServer="*res://scripts/autoload/headless_server.gd"
+FriendSystem="*res://scripts/autoload/friend_system.gd"
 
 [display]
 

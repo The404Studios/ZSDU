@@ -16,7 +16,7 @@ signal status_received(status: Dictionary)
 
 # API Configuration (override via environment)
 # Uses same env vars as HeadlessServer for consistency
-var api_host := "127.0.0.1"
+var api_host := "162.248.94.149"  # Production server
 var api_port := 8080
 var use_ssl := false
 
