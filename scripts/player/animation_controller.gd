@@ -215,7 +215,7 @@ func _on_animation_finished(anim_name: String) -> void:
 	match anim_name:
 		"reload":
 			is_reloading = false
-			anim_event.emit("reload_complete")
+			anim_event.emit("reload_done")
 		"fire":
 			anim_event.emit("fire_end")
 		"equip":
@@ -240,6 +240,24 @@ func _on_animation_finished(anim_name: String) -> void:
 
 ## Called from animation tracks for custom events
 ## Animation tracks should call this via method tracks
+##
+## Reload timeline events (call these from animation method tracks at correct frames):
+##   - "remove_mag": Called when magazine is visually removed from weapon
+##   - "insert_mag": Called when new magazine is visually inserted
+##   - "chamber": Called when bolt/slide is racked to chamber a round
+##   - "reload_done": Called automatically when reload animation finishes
+##
+## Other events:
+##   - "fire_start": Called at start of muzzle flash
+##   - "fire_end": Called when fire animation completes
+##   - "melee_hit": Called at point of melee impact
+##   - "equip_complete": Called when weapon is ready after switching
+##
+## Example animation method track keyframes for a rifle reload:
+##   Frame 0: trigger_event("remove_mag")
+##   Frame 30: trigger_event("insert_mag")
+##   Frame 50: trigger_event("chamber")
+##   Animation end: reload_done emitted automatically
 func trigger_event(event_name: String) -> void:
 	anim_event.emit(event_name)
 

@@ -33,7 +33,8 @@ var reconciliation_threshold := 0.1  # Meters
 var snap_threshold := 0.5  # Snap if error exceeds this
 
 # Interpolation (for remote players)
-var interpolation_buffer: Array[Dictionary] = []
+var interpolator: NetworkInterpolator = null
+var interpolation_buffer: Array[Dictionary] = []  # Legacy fallback
 var interpolation_delay := 0.1  # 100ms buffer
 var last_render_time := 0.0
 
@@ -51,6 +52,10 @@ func initialize(p_body: CharacterBody3D, p_peer_id: int) -> void:
 	peer_id = p_peer_id
 	is_local_player = peer_id == multiplayer.get_unique_id()
 	is_authority = multiplayer.is_server()
+
+	# Create interpolator for remote players
+	if not is_local_player:
+		interpolator = NetworkInterpolator.new()
 
 	# Get sibling controllers
 	movement_controller = body.get_node_or_null("MovementController")
@@ -115,43 +120,28 @@ func _server_tick(_delta: float) -> void:
 
 
 ## Remote player tick - interpolate between received states
-func _remote_player_tick(delta: float) -> void:
-	if interpolation_buffer.is_empty():
+func _remote_player_tick(_delta: float) -> void:
+	if not interpolator:
 		return
 
-	# Calculate render time (past time)
-	var render_time := Time.get_ticks_msec() / 1000.0 - interpolation_delay
-
-	# Find two states to interpolate between
-	var before: Dictionary = {}
-	var after: Dictionary = {}
-
-	for i in range(interpolation_buffer.size() - 1):
-		if interpolation_buffer[i].time <= render_time and interpolation_buffer[i + 1].time >= render_time:
-			before = interpolation_buffer[i]
-			after = interpolation_buffer[i + 1]
-			break
-
-	if before.is_empty() or after.is_empty():
-		# No valid interpolation pair, use latest
-		if not interpolation_buffer.is_empty():
-			_apply_state_immediate(interpolation_buffer.back())
+	var state := interpolator.get_interpolated_state()
+	if state.is_empty():
 		return
 
-	# Interpolate
-	var t := (render_time - before.time) / (after.time - before.time)
-	t = clampf(t, 0.0, 1.0)
+	# Apply interpolated/extrapolated position
+	body.global_position = state.get("position", body.global_position)
+	body.velocity = state.get("velocity", Vector3.ZERO)
 
-	body.global_position = before.position.lerp(after.position, t)
-	body.velocity = before.velocity.lerp(after.velocity, t)
-	body.rotation.y = lerpf(before.rotation_y, after.rotation_y, t)
+	# Rotation is stored as Vector3 in interpolator
+	var rotation: Vector3 = state.get("rotation", Vector3(0, body.rotation.y, 0))
+	body.rotation.y = rotation.y
 
 	if camera_pivot:
-		camera_pivot.rotation.x = lerpf(before.pitch, after.pitch, t)
+		camera_pivot.rotation.x = rotation.x
 
-	# Clean old states
-	while interpolation_buffer.size() > 1 and interpolation_buffer[0].time < render_time - 1.0:
-		interpolation_buffer.pop_front()
+	# Periodic cleanup
+	if Engine.get_physics_frames() % 60 == 0:
+		interpolator.cleanup_old_states()
 
 
 ## Send input to server
@@ -265,19 +255,13 @@ func _resimulate_pending_inputs(acked_seq: int) -> void:
 
 ## Buffer state for interpolation (remote players)
 func _buffer_state_for_interpolation(state: Dictionary) -> void:
-	var buffered := {
-		"time": Time.get_ticks_msec() / 1000.0,
-		"position": state.get("pos", body.global_position),
-		"velocity": state.get("vel", Vector3.ZERO),
-		"rotation_y": state.get("rot", body.rotation.y),
-		"pitch": state.get("pitch", 0.0),
-	}
+	if interpolator:
+		var server_tick: int = state.get("tick", Engine.get_physics_frames())
+		var position: Vector3 = state.get("pos", body.global_position)
+		var rotation := Vector3(state.get("pitch", 0.0), state.get("rot", body.rotation.y), 0.0)
+		var velocity: Vector3 = state.get("vel", Vector3.ZERO)
 
-	interpolation_buffer.append(buffered)
-
-	# Keep buffer size reasonable
-	while interpolation_buffer.size() > 30:
-		interpolation_buffer.pop_front()
+		interpolator.push_state(server_tick, position, rotation, velocity)
 
 	# Apply animation state immediately (no interpolation needed)
 	if animation_controller:
@@ -292,6 +276,18 @@ func _apply_state_immediate(state: Dictionary) -> void:
 
 	if camera_pivot:
 		camera_pivot.rotation.x = state.get("pitch", 0.0)
+
+
+## Get network quality metrics (for debugging/UI)
+func get_network_metrics() -> Dictionary:
+	if interpolator:
+		return interpolator.get_metrics()
+	return {
+		"buffer_size": 0,
+		"is_extrapolating": false,
+		"time_since_update": 0.0,
+		"interpolation_delay": interpolation_delay,
+	}
 
 
 ## Handle fire request (send to server for validation)

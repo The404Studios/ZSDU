@@ -146,6 +146,7 @@ func has_mag() -> bool:
 
 
 ## Handle animation events
+## These events are triggered by animation method tracks at specific frames
 func on_anim_event(event_name: String) -> void:
 	match event_name:
 		"remove_mag":
@@ -154,22 +155,52 @@ func on_anim_event(event_name: String) -> void:
 			_attach_mag()
 		"chamber":
 			_chamber_round()
+		"reload_done":
+			_reload_done()
 
 
+## Called when magazine is visually removed from weapon
 func _detach_mag() -> void:
-	# Visual/audio feedback
-	pass
+	var weapon := get_current_weapon()
+	if weapon:
+		# Store remaining ammo from old mag (could be returned to inventory)
+		var remaining := weapon.current_ammo
+		if remaining > 0:
+			# Partial mag - could track this for tactical reload systems
+			pass
+		weapon.current_ammo = 0
+		weapon.chambered = false
 
 
+## Called when new magazine is visually inserted
 func _attach_mag() -> void:
-	# Ammo transfer handled by CombatController
-	pass
+	var weapon := get_current_weapon()
+	if not weapon:
+		return
+
+	# Transfer ammo from reserves to weapon
+	var needed := weapon.magazine_size
+	var available := get_ammo_count(weapon.ammo_type)
+	var transfer := mini(needed, available)
+
+	if transfer > 0:
+		consume_ammo(weapon.ammo_type, transfer)
+		weapon.add_ammo(transfer)
 
 
+## Called when bolt/slide is racked to chamber a round
 func _chamber_round() -> void:
 	var weapon := get_current_weapon()
 	if weapon:
 		weapon.chamber()
+
+
+## Called when reload animation completes
+func _reload_done() -> void:
+	# Final cleanup after reload
+	var weapon := get_current_weapon()
+	if weapon and weapon.current_ammo > 0:
+		weapon.chambered = true
 
 
 ## Pick up loot during raid

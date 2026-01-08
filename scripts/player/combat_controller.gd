@@ -181,39 +181,26 @@ func _cancel_reload() -> void:
 
 
 ## Handle animation events
+## Reload timeline:
+##   1. "remove_mag" - Magazine ejected (ammo emptied in InventoryRuntime)
+##   2. "insert_mag" - New magazine inserted (ammo loaded in InventoryRuntime)
+##   3. "chamber" - Round chambered (InventoryRuntime handles this)
+##   4. "reload_done" - Animation complete, reload finished
 func _on_anim_event(event_name: String) -> void:
 	match event_name:
-		"reload_complete":
+		"reload_done":
 			_complete_reload()
 		"reload_cancel":
 			is_reloading = false
-		"chamber":
-			_chamber_round()
 		"fire_end":
 			is_firing = false
 
 
-## Complete reload (called by animation event)
+## Complete reload (called when reload animation finishes)
 func _complete_reload() -> void:
 	is_reloading = false
-
-	if not current_weapon or not inventory_runtime:
-		return
-
-	# Transfer ammo from inventory to weapon
-	var ammo_type := current_weapon.ammo_type
-	var needed := current_weapon.magazine_size - current_weapon.current_ammo
-	var available := inventory_runtime.get_ammo_count(ammo_type)
-	var transfer := mini(needed, available)
-
-	inventory_runtime.consume_ammo(ammo_type, transfer)
-	current_weapon.add_ammo(transfer)
-
-
-## Chamber a round (for bolt-action/pump after fire)
-func _chamber_round() -> void:
-	if current_weapon:
-		current_weapon.chamber()
+	# Ammo transfer is handled by InventoryRuntime via animation events
+	# (remove_mag -> insert_mag -> chamber -> reload_done)
 
 
 ## Get current combat state for network sync
