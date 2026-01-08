@@ -24,10 +24,10 @@ enum ConnectionState {
 	ERROR
 }
 
-# Traversal server config
-const TRAVERSAL_HOST := "162.248.94.149"
+# Traversal server config (for LAN/session discovery only)
+const TRAVERSAL_HOST := "162.248.94.149"  # Production server
 const TRAVERSAL_PORT := 7777
-const HEARTBEAT_INTERVAL := 5.0
+const HEARTBEAT_INTERVAL := 5.0      # Session heartbeat (NOT game server heartbeat)
 const TIMEOUT_DURATION := 15.0
 
 # Protocol message types

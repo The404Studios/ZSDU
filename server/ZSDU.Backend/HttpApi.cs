@@ -15,6 +15,7 @@ public class HttpApi
     private readonly SessionRegistry _registry;
     private readonly ServerOrchestrator _orchestrator;
     private readonly GameService _gameService;
+    private readonly FriendService _friendService;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -28,6 +29,7 @@ public class HttpApi
         _registry = registry;
         _orchestrator = orchestrator;
         _gameService = gameService;
+        _friendService = new FriendService();
         _listener = new HttpListener();
     }
 
@@ -104,6 +106,16 @@ public class HttpApi
                 ("/game/player_left", "POST") => await HandlePlayerLeft(request),
                 ("/game/wave_complete", "POST") => await HandleWaveComplete(request),
                 ("/game/match_end", "POST") => await HandleMatchEnd(request),
+
+                // Friend system
+                ("/friends/add", "POST") => await HandleFriendAdd(request),
+                ("/friends/remove", "POST") => await HandleFriendRemove(request),
+                ("/friends/accept", "POST") => await HandleFriendAccept(request),
+                ("/friends/decline", "POST") => await HandleFriendDecline(request),
+                ("/friends/status", "POST") => await HandleFriendStatus(request),
+                ("/friends/requests", "POST") => await HandleFriendRequests(request),
+                ("/friends/invite", "POST") => await HandleFriendInvite(request),
+                ("/friends/list", "POST") => await HandleFriendList(request),
 
                 _ => null
             };
@@ -237,7 +249,7 @@ public class HttpApi
                 {
                     matchId = existingMatch.Id,
                     status = "already_matched",
-                    serverHost = "127.0.0.1", // TODO: Get actual host
+                    serverHost = "162.248.94.149",  // Production server
                     serverPort = existingServer?.Port ?? 0
                 };
             }
@@ -285,7 +297,7 @@ public class HttpApi
         {
             matchId = match.Id,
             status = "matched",
-            serverHost = "127.0.0.1", // TODO: Get actual public IP
+            serverHost = "162.248.94.149",  // Production server
             serverPort = server.Port,
             gameMode = match.GameMode
         };
@@ -368,6 +380,86 @@ public class HttpApi
     }
 
     // ============================================
+    // FRIEND SYSTEM
+    // ============================================
+
+    private async Task<object> HandleFriendAdd(HttpListenerRequest request)
+    {
+        var body = await ReadBodyAsync<FriendRequest>(request);
+        if (body == null) return new { error = "Invalid request" };
+
+        _friendService.SendFriendRequest(body.PlayerId, body.FriendId);
+        return new { message = "Friend request sent" };
+    }
+
+    private async Task<object> HandleFriendRemove(HttpListenerRequest request)
+    {
+        var body = await ReadBodyAsync<FriendRequest>(request);
+        if (body == null) return new { error = "Invalid request" };
+
+        _friendService.RemoveFriend(body.PlayerId, body.FriendId);
+        return new { message = "Friend removed" };
+    }
+
+    private async Task<object> HandleFriendAccept(HttpListenerRequest request)
+    {
+        var body = await ReadBodyAsync<FriendRequest>(request);
+        if (body == null) return new { error = "Invalid request" };
+
+        var friend = _friendService.AcceptFriendRequest(body.PlayerId, body.FriendId);
+        return new { message = "Friend added", friend };
+    }
+
+    private async Task<object> HandleFriendDecline(HttpListenerRequest request)
+    {
+        var body = await ReadBodyAsync<FriendRequest>(request);
+        if (body == null) return new { error = "Invalid request" };
+
+        _friendService.DeclineFriendRequest(body.PlayerId, body.FriendId);
+        return new { message = "Request declined" };
+    }
+
+    private async Task<object> HandleFriendStatus(HttpListenerRequest request)
+    {
+        var body = await ReadBodyAsync<FriendStatusRequest>(request);
+        if (body == null) return new { error = "Invalid request" };
+
+        // Update player's online status
+        _friendService.UpdatePlayerStatus(body.PlayerId, true, _registry.GetPlayerMatch(body.PlayerId));
+
+        var statuses = _friendService.GetFriendStatuses(body.FriendIds);
+        return new { statuses };
+    }
+
+    private async Task<object> HandleFriendRequests(HttpListenerRequest request)
+    {
+        var body = await ReadBodyAsync<PlayerIdRequest>(request);
+        if (body == null) return new { error = "Invalid request" };
+
+        var requests = _friendService.GetPendingRequests(body.PlayerId);
+        var invites = _friendService.GetPendingInvites(body.PlayerId);
+        return new { requests, invites };
+    }
+
+    private async Task<object> HandleFriendInvite(HttpListenerRequest request)
+    {
+        var body = await ReadBodyAsync<FriendInviteRequest>(request);
+        if (body == null) return new { error = "Invalid request" };
+
+        _friendService.SendGameInvite(body.FromPlayerId, body.ToPlayerId, body.ServerInfo);
+        return new { message = "Invite sent" };
+    }
+
+    private async Task<object> HandleFriendList(HttpListenerRequest request)
+    {
+        var body = await ReadBodyAsync<PlayerIdRequest>(request);
+        if (body == null) return new { error = "Invalid request" };
+
+        var friends = _friendService.GetFriends(body.PlayerId);
+        return new { friends };
+    }
+
+    // ============================================
     // HELPERS
     // ============================================
 
@@ -441,4 +533,29 @@ public class MatchEndRequest
     public string MatchId { get; set; } = "";
     public string? Reason { get; set; }
     public int FinalWave { get; set; }
+}
+
+// Friend system request models
+public class FriendRequest
+{
+    public string PlayerId { get; set; } = "";
+    public string FriendId { get; set; } = "";
+}
+
+public class FriendStatusRequest
+{
+    public string PlayerId { get; set; } = "";
+    public List<string> FriendIds { get; set; } = new();
+}
+
+public class PlayerIdRequest
+{
+    public string PlayerId { get; set; } = "";
+}
+
+public class FriendInviteRequest
+{
+    public string FromPlayerId { get; set; } = "";
+    public string ToPlayerId { get; set; } = "";
+    public Dictionary<string, object>? ServerInfo { get; set; }
 }
