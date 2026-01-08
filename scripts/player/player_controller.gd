@@ -1,70 +1,103 @@
 extends CharacterBody3D
 class_name PlayerController
-## PlayerController - Server-authoritative player with client-side prediction
+## PlayerController - Main player orchestrator
 ##
-## Clients: Send input, predict locally, reconcile with server
-## Server: Receives input, simulates authoritatively, broadcasts state
+## This is the root node that coordinates all subsystems:
+## - MovementController: Physics, stamina, posture
+## - CombatController: Weapons, reloads, ADS
+## - AnimationController: Animation state machine
+## - InventoryRuntime: Ephemeral in-raid inventory
+## - PlayerNetworkController: Authority, sync, prediction
+##
+## The controller does NOT own persistence, inventory truth, or economy.
+## Everything flows through the backend via RaidManager.
 
-# Movement constants
-const WALK_SPEED := 5.0
-const SPRINT_SPEED := 8.0
-const JUMP_VELOCITY := 5.0
-const MOUSE_SENSITIVITY := 0.002
-const ACCELERATION := 10.0
-const FRICTION := 8.0
-const AIR_CONTROL := 0.3
+signal player_ready()
+signal player_died()
+signal player_spawned(position: Vector3)
 
-# Player state
+# Player identity
+var peer_id: int = 0
+var character_id: String = ""
+var is_local_player := false
+
+# Health (server-authoritative)
 @export var max_health := 100.0
 var health: float = 100.0
 var is_dead := false
-var is_sprinting := false
 
-# Network state
-var peer_id: int = 0
-var is_local_player := false
-
-# Input state (sent to server)
-var input_direction := Vector3.ZERO
-var look_rotation := Vector2.ZERO  # pitch, yaw
-var wants_jump := false
-var wants_sprint := false
-var wants_primary := false
-var wants_secondary := false
-var wants_reload := false
-var wants_interact := false
-
-# Client-side prediction
-var pending_inputs: Array[Dictionary] = []
-var last_server_position := Vector3.ZERO
-var last_server_velocity := Vector3.ZERO
-var input_sequence := 0
+# Mouse look
+var look_yaw: float = 0.0
+var look_pitch: float = 0.0
+const MOUSE_SENSITIVITY := 0.002
 
 # Node references
-@onready var camera_pivot: Node3D = $CameraPivot
-@onready var camera: Camera3D = $CameraPivot/Camera3D
 @onready var collision_shape: CollisionShape3D = $CollisionShape3D
 @onready var mesh: MeshInstance3D = $MeshInstance3D
+@onready var camera_pivot: Node3D = $CameraPivot
+@onready var camera: Camera3D = $CameraPivot/Camera3D
 
-# Inventory / Equipment
-var current_weapon_slot := 0
-var inventory: Array[Node] = []
+# Controllers (added as children dynamically)
+var movement_controller: MovementController = null
+var combat_controller: CombatController = null
+var animation_controller: AnimationController = null
+var inventory_runtime: InventoryRuntime = null
+var network_controller: PlayerNetworkController = null
 
-# Prop handling
+# Prop handler (for barricade system)
 var prop_handler: PropHandler = null
-
-# Network interpolation (for remote players)
-var _interpolator: NetworkInterpolator = null
-var _last_interp_tick: int = 0
 
 
 func _ready() -> void:
-	# Determine if this is our local player
 	peer_id = get_multiplayer_authority()
 	is_local_player = peer_id == multiplayer.get_unique_id()
 
+	_setup_controllers()
+	_setup_local_player()
+
+	health = max_health
+	player_ready.emit()
+
+
+func _setup_controllers() -> void:
+	# Movement Controller
+	movement_controller = MovementController.new()
+	movement_controller.name = "MovementController"
+	add_child(movement_controller)
+	movement_controller.initialize(self, collision_shape)
+
+	# Animation Controller (create even without animations for state tracking)
+	animation_controller = AnimationController.new()
+	animation_controller.name = "AnimationController"
+	add_child(animation_controller)
+	# Will be initialized with AnimationPlayer when FP_Arms are added
+
+	# Inventory Runtime
+	inventory_runtime = InventoryRuntime.new()
+	inventory_runtime.name = "InventoryRuntime"
+	add_child(inventory_runtime)
+
+	# Combat Controller
+	combat_controller = CombatController.new()
+	combat_controller.name = "CombatController"
+	add_child(combat_controller)
+	combat_controller.initialize(animation_controller, inventory_runtime, camera)
+
+	# Network Controller
+	network_controller = PlayerNetworkController.new()
+	network_controller.name = "NetworkController"
+	add_child(network_controller)
+	network_controller.initialize(self, peer_id)
+
+	# Connect signals
+	movement_controller.posture_changed.connect(_on_posture_changed)
+	movement_controller.stamina_changed.connect(_on_stamina_changed)
+	combat_controller.fire_requested.connect(_on_fire_requested)
+
+
+func _setup_local_player() -> void:
 	if is_local_player:
-		# Enable camera, capture mouse
+		# Enable camera
 		camera.current = true
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
@@ -72,148 +105,97 @@ func _ready() -> void:
 		if mesh:
 			mesh.visible = false
 
-		# Initialize prop handler for local player
+		# Initialize prop handler
 		prop_handler = PropHandler.new()
 		add_child(prop_handler)
 		prop_handler.initialize(self)
+
+		# Register raid if we have one
+		_register_raid_with_server()
 	else:
-		# Disable camera for remote players
+		# Remote player
 		camera.current = false
 
-		# Initialize interpolator for remote players
-		_interpolator = NetworkInterpolator.new()
 
-	# Initialize health
-	health = max_health
+func _register_raid_with_server() -> void:
+	# Called by client to send their raid info to server
+	if RaidManager:
+		RaidManager.client_register_raid()
 
 
 func _input(event: InputEvent) -> void:
 	if not is_local_player:
 		return
 
+	if is_dead:
+		return
+
 	# Mouse look
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
-		look_rotation.y -= event.relative.x * MOUSE_SENSITIVITY
-		look_rotation.x -= event.relative.y * MOUSE_SENSITIVITY
-		look_rotation.x = clampf(look_rotation.x, -PI/2 + 0.1, PI/2 - 0.1)
+		look_yaw -= event.relative.x * MOUSE_SENSITIVITY
+		look_pitch -= event.relative.y * MOUSE_SENSITIVITY
+		look_pitch = clampf(look_pitch, -PI/2 + 0.1, PI/2 - 0.1)
 
 		# Apply rotation locally for responsive feel
-		rotation.y = look_rotation.y
-		camera_pivot.rotation.x = look_rotation.x
+		rotation.y = look_yaw
+		camera_pivot.rotation.x = look_pitch
 
 
 func _physics_process(delta: float) -> void:
-	if is_local_player:
-		_gather_input()
-		_send_input_to_server()
-		_predict_movement(delta)
-	elif NetworkManager.is_authority():
-		# Server simulates all players
-		_server_simulate(delta)
+	if is_dead:
+		return
+
+	# Network controller handles all the tick logic based on authority
+	# Movement and combat are processed there
+
+	# Update animation from movement state
+	if animation_controller and movement_controller:
+		animation_controller.update_from_movement(
+			velocity,
+			movement_controller.posture,
+			is_on_floor(),
+			movement_controller.is_sprinting
+		)
 
 
-## Gather input from local player
-func _gather_input() -> void:
-	# Movement direction
-	var input_dir := Vector2.ZERO
-	if Input.is_action_pressed("move_forward"):
-		input_dir.y -= 1
-	if Input.is_action_pressed("move_backward"):
-		input_dir.y += 1
-	if Input.is_action_pressed("move_left"):
-		input_dir.x -= 1
-	if Input.is_action_pressed("move_right"):
-		input_dir.x += 1
+## Initialize loadout from RaidManager (called when raid starts)
+func initialize_loadout(loadout: Dictionary, p_character_id: String, raid_id: String) -> void:
+	character_id = p_character_id
 
-	input_direction = Vector3(input_dir.x, 0, input_dir.y).normalized()
+	if inventory_runtime:
+		inventory_runtime.initialize_from_loadout(loadout, p_character_id, raid_id)
 
-	# Transform to world space based on look direction
-	input_direction = input_direction.rotated(Vector3.UP, look_rotation.y)
-
-	# Actions
-	wants_jump = Input.is_action_just_pressed("jump")
-	wants_sprint = Input.is_action_pressed("sprint")
-	wants_primary = Input.is_action_pressed("primary_action")
-	wants_secondary = Input.is_action_pressed("secondary_action")
-	wants_reload = Input.is_action_just_pressed("reload")
-	wants_interact = Input.is_action_just_pressed("interact")
-
-	is_sprinting = wants_sprint and input_direction.length() > 0.1 and is_on_floor()
+	# Equip first weapon
+	if combat_controller and inventory_runtime:
+		var weapon := inventory_runtime.get_weapon(0)
+		if weapon:
+			combat_controller.bind_weapon(weapon)
 
 
-## Send input to server
-func _send_input_to_server() -> void:
-	input_sequence += 1
+## Get network state for snapshot (called by GameState)
+func get_network_state() -> Dictionary:
+	if network_controller:
+		return network_controller.get_network_state()
 
-	var input_data := {
-		"seq": input_sequence,
-		"dir": input_direction,
-		"look": look_rotation,
-		"jump": wants_jump,
-		"sprint": wants_sprint,
-		"primary": wants_primary,
-		"secondary": wants_secondary,
-		"reload": wants_reload,
-		"interact": wants_interact,
+	# Fallback if no network controller
+	return {
+		"pos": global_position,
+		"vel": velocity,
+		"rot": rotation.y,
+		"pitch": camera_pivot.rotation.x if camera_pivot else 0.0,
+		"health": health,
+		"dead": is_dead,
 	}
 
-	# Store for reconciliation
-	pending_inputs.append({
-		"seq": input_sequence,
-		"input": input_data,
-		"position": global_position,
-		"velocity": velocity,
-	})
 
-	# Limit pending inputs buffer
-	while pending_inputs.size() > 60:
-		pending_inputs.pop_front()
+## Apply network state from server (called by GameState)
+func apply_network_state(state: Dictionary) -> void:
+	# Apply health
+	health = state.get("health", health)
+	is_dead = state.get("dead", is_dead)
 
-	# Send to server
-	NetworkManager.send_player_input.rpc_id(1, input_data)
-
-
-## Client-side prediction
-func _predict_movement(delta: float) -> void:
-	_apply_movement(delta)
-
-
-## Server-side simulation
-func _server_simulate(delta: float) -> void:
-	_apply_movement(delta)
-
-
-## Apply movement physics
-func _apply_movement(delta: float) -> void:
-	# Gravity
-	if not is_on_floor():
-		velocity.y -= ProjectSettings.get_setting("physics/3d/default_gravity") * delta
-
-	# Jump
-	if wants_jump and is_on_floor():
-		velocity.y = JUMP_VELOCITY
-		wants_jump = false
-
-	# Movement speed
-	var speed := SPRINT_SPEED if is_sprinting else WALK_SPEED
-
-	# Ground movement
-	if is_on_floor():
-		var target_velocity := input_direction * speed
-		velocity.x = move_toward(velocity.x, target_velocity.x, ACCELERATION * delta * speed)
-		velocity.z = move_toward(velocity.z, target_velocity.z, ACCELERATION * delta * speed)
-	else:
-		# Air control
-		var target_velocity := input_direction * speed * AIR_CONTROL
-		velocity.x = move_toward(velocity.x, target_velocity.x, ACCELERATION * delta * speed * AIR_CONTROL)
-		velocity.z = move_toward(velocity.z, target_velocity.z, ACCELERATION * delta * speed * AIR_CONTROL)
-
-	# Apply friction when no input
-	if input_direction.length() < 0.1 and is_on_floor():
-		velocity.x = move_toward(velocity.x, 0, FRICTION * delta * speed)
-		velocity.z = move_toward(velocity.z, 0, FRICTION * delta * speed)
-
-	move_and_slide()
+	if network_controller:
+		network_controller.apply_network_state(state)
 
 
 ## Apply input from network (server-side, called by GameState)
@@ -221,173 +203,11 @@ func apply_input(input_data: Dictionary) -> void:
 	if not NetworkManager.is_authority():
 		return
 
-	# Apply look rotation
-	if "look" in input_data:
-		look_rotation = input_data.look
-		rotation.y = look_rotation.y
-		camera_pivot.rotation.x = look_rotation.x
-
-	# Apply movement input
-	if "dir" in input_data:
-		input_direction = input_data.dir
-
-	# Apply actions
-	wants_jump = input_data.get("jump", false)
-	wants_sprint = input_data.get("sprint", false)
-	wants_primary = input_data.get("primary", false)
-	wants_secondary = input_data.get("secondary", false)
-	wants_reload = input_data.get("reload", false)
-	wants_interact = input_data.get("interact", false)
-
-	is_sprinting = wants_sprint and input_direction.length() > 0.1 and is_on_floor()
-
-	# Handle weapon actions
-	if wants_primary:
-		_handle_primary_action()
-	if wants_secondary:
-		_handle_secondary_action()
-	if wants_interact:
-		_handle_interact()
+	if network_controller:
+		network_controller.server_receive_input(input_data)
 
 
-## Get network state for snapshot (server-side)
-func get_network_state() -> Dictionary:
-	return {
-		"pos": global_position,
-		"vel": velocity,
-		"rot": rotation.y,
-		"pitch": camera_pivot.rotation.x,
-		"health": health,
-		"dead": is_dead,
-		"sprinting": is_sprinting,
-	}
-
-
-## Apply network state from server (client-side)
-func apply_network_state(state: Dictionary) -> void:
-	if is_local_player:
-		# Reconciliation for local player
-		_reconcile_with_server(state)
-	else:
-		# Direct interpolation for remote players
-		_interpolate_to_state(state)
-
-
-## Reconcile local prediction with server state
-func _reconcile_with_server(state: Dictionary) -> void:
-	var server_pos: Vector3 = state.pos
-	var server_vel: Vector3 = state.vel
-
-	# Check if we need correction
-	var pos_error := global_position.distance_to(server_pos)
-
-	if pos_error > 0.5:
-		# Significant error - snap to server position
-		global_position = server_pos
-		velocity = server_vel
-	elif pos_error > 0.1:
-		# Small error - smooth correction
-		global_position = global_position.lerp(server_pos, 0.3)
-		velocity = velocity.lerp(server_vel, 0.3)
-
-	# Apply other state
-	health = state.get("health", health)
-	is_dead = state.get("dead", is_dead)
-
-
-## Interpolate remote player to state
-func _interpolate_to_state(state: Dictionary) -> void:
-	if _interpolator:
-		# Use jitter-buffered interpolation
-		var tick: int = state.get("tick", _last_interp_tick + 1)
-		_interpolator.push_state(
-			tick,
-			state.pos,
-			Vector3(state.get("pitch", 0), state.get("rot", 0), 0),
-			state.get("vel", Vector3.ZERO)
-		)
-
-		var interp_state := _interpolator.get_interpolated_state(tick)
-		if not interp_state.is_empty():
-			global_position = interp_state.position
-			rotation.y = interp_state.rotation.y
-			camera_pivot.rotation.x = interp_state.rotation.x
-
-		_last_interp_tick = tick
-	else:
-		# Fallback: direct lerp
-		var target_pos: Vector3 = state.pos
-		global_position = global_position.lerp(target_pos, 0.5)
-		rotation.y = state.get("rot", rotation.y)
-		camera_pivot.rotation.x = state.get("pitch", camera_pivot.rotation.x)
-
-	# Apply state
-	health = state.get("health", health)
-	is_dead = state.get("dead", is_dead)
-	is_sprinting = state.get("sprinting", is_sprinting)
-
-
-## Handle primary action (shoot/hammer/nail)
-func _handle_primary_action() -> void:
-	# If holding a prop, primary action = nail
-	if prop_handler and prop_handler.is_holding:
-		prop_handler.handle_primary_action()
-		return
-
-	# Get current weapon and trigger
-	var weapon := _get_current_weapon()
-	if weapon and weapon.has_method("primary_action"):
-		weapon.primary_action()
-
-
-## Handle secondary action (aim/alt fire/throw)
-func _handle_secondary_action() -> void:
-	# If holding a prop, secondary action = throw
-	if prop_handler and prop_handler.is_holding:
-		prop_handler.handle_secondary_action()
-		return
-
-	var weapon := _get_current_weapon()
-	if weapon and weapon.has_method("secondary_action"):
-		weapon.secondary_action()
-
-
-## Handle interact (pickup props, use objects)
-func _handle_interact() -> void:
-	# Check if player is holding a prop - handle via prop handler
-	if prop_handler and prop_handler.is_holding:
-		prop_handler.handle_interact()
-		return
-
-	# Raycast to find interactable
-	if not camera:
-		return
-
-	var space_state := get_world_3d().direct_space_state
-	var from := camera.global_position
-	var to := from - camera.global_basis.z * 3.0  # 3 meter reach
-
-	var query := PhysicsRayQueryParameters3D.create(from, to)
-	query.exclude = [self]
-
-	var result := space_state.intersect_ray(query)
-
-	if result and result.collider.has_method("interact"):
-		result.collider.interact(self)
-	elif result and result.collider is BarricadeProp:
-		# Prop pickup via interact
-		if prop_handler:
-			prop_handler.handle_interact()
-
-
-## Get currently equipped weapon
-func _get_current_weapon() -> Node:
-	if current_weapon_slot >= 0 and current_weapon_slot < inventory.size():
-		return inventory[current_weapon_slot]
-	return null
-
-
-## Take damage (server-side)
+## Take damage (server-side only)
 func take_damage(amount: float, _from_position: Vector3 = Vector3.ZERO) -> void:
 	if not NetworkManager.is_authority():
 		return
@@ -405,9 +225,12 @@ func take_damage(amount: float, _from_position: Vector3 = Vector3.ZERO) -> void:
 ## Die (server-side)
 func _die() -> void:
 	is_dead = true
-	GameState.player_died.emit(peer_id)
 
-	# Could trigger respawn timer, spectate mode, etc.
+	if animation_controller:
+		animation_controller.play_death()
+
+	player_died.emit()
+	GameState.player_died.emit(peer_id)
 
 
 ## Respawn (server-side)
@@ -420,29 +243,69 @@ func respawn(spawn_position: Vector3) -> void:
 	health = max_health
 	is_dead = false
 
+	player_spawned.emit(spawn_position)
 
-## Get camera for weapons/tools
+
+## Request extraction (called when player reaches extraction zone)
+func request_extract() -> void:
+	if is_local_player:
+		RaidManager.client_request_extract()
+
+
+# ============================================
+# SIGNAL HANDLERS
+# ============================================
+
+func _on_posture_changed(_posture: int) -> void:
+	# Could update visuals, camera height, etc.
+	pass
+
+
+func _on_stamina_changed(_current: float, _max_value: float) -> void:
+	# Could update HUD
+	pass
+
+
+func _on_fire_requested(_weapon_state: Dictionary) -> void:
+	# Visual/audio feedback for local player
+	if is_local_player:
+		# Play muzzle flash, sound, etc.
+		pass
+
+
+# ============================================
+# PUBLIC API
+# ============================================
+
 func get_camera() -> Camera3D:
 	return camera
 
 
-## Get camera pivot for weapon attachment
 func get_camera_pivot() -> Node3D:
 	return camera_pivot
 
 
-## Get prop handler for prop interaction
 func get_prop_handler() -> PropHandler:
 	return prop_handler
 
 
-## Check if player is holding a prop
 func is_holding_prop() -> bool:
 	return prop_handler != null and prop_handler.is_holding
 
 
-## Get ID of held prop (-1 if not holding)
 func get_held_prop_id() -> int:
 	if prop_handler:
 		return prop_handler.held_prop_id
 	return -1
+
+
+func get_movement_controller() -> MovementController:
+	return movement_controller
+
+
+func get_combat_controller() -> CombatController:
+	return combat_controller
+
+
+func get_inventory_runtime() -> InventoryRuntime:
+	return inventory_runtime
