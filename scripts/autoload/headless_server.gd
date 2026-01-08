@@ -385,6 +385,10 @@ func set_match_id(match_id: String) -> void:
 	current_match_id = match_id
 	print("[HeadlessServer] Match ID set: %s" % match_id)
 
+	# Also set match ID on RaidManager
+	if RaidManager:
+		RaidManager.set_match_id(match_id)
+
 
 # ============================================
 # SHUTDOWN
@@ -398,6 +402,10 @@ func _shutdown(reason: String) -> void:
 	# Stop timers
 	if _heartbeat_timer:
 		_heartbeat_timer.stop()
+
+	# End all active raids in RaidManager
+	if RaidManager:
+		await RaidManager.end_match(reason)
 
 	# Report match end
 	if current_match_id != "":

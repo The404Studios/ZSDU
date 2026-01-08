@@ -14,6 +14,7 @@ signal zombie_spawned(zombie_id: int)
 signal zombie_killed(zombie_id: int)
 signal barricade_damaged(nail_id: int, damage: float)
 signal barricade_destroyed(nail_id: int)
+signal hit_confirmed(peer_id: int, hit_data: Dictionary)
 
 enum GamePhase {
 	LOBBY,
@@ -228,6 +229,8 @@ func handle_event(event_type: String, event_data: Dictionary) -> void:
 			_handle_prop_dropped_event(event_data)
 		"prop_thrown":
 			_handle_prop_thrown_event(event_data)
+		"hit_confirmed":
+			_handle_hit_confirmed_event(event_data)
 
 
 ## Called when a player disconnects
@@ -869,6 +872,26 @@ func _handle_prop_thrown_event(event_data: Dictionary) -> void:
 				handler.on_drop_confirmed()
 
 
+## Handle hit confirmed event (client-side, for visual effects)
+func _handle_hit_confirmed_event(event_data: Dictionary) -> void:
+	var position: Vector3 = event_data.get("position", Vector3.ZERO)
+	var normal: Vector3 = event_data.get("normal", Vector3.UP)
+	var target_type: String = event_data.get("target_type", "world")
+	var is_headshot: bool = event_data.get("is_headshot", false)
+	var shooter_id: int = event_data.get("shooter_id", -1)
+
+	# Spawn hit effect at position
+	# This would typically spawn a decal, particles, or blood effect
+	# For now, emit signal so UI/effects can respond
+	hit_confirmed.emit(shooter_id, event_data)
+
+	# Local player gets hitmarker feedback
+	var local_peer := multiplayer.get_unique_id()
+	if shooter_id == local_peer and target_type != "world":
+		# Could play hitmarker sound, show crosshair feedback, etc.
+		pass
+
+
 # ============================================
 # COMBAT SYSTEM
 # ============================================
@@ -883,30 +906,107 @@ func _handle_shoot(peer_id: int, data: Dictionary) -> void:
 		return
 
 	# Server validates and performs raycast
-	var origin: Vector3 = data.origin
-	var direction: Vector3 = data.direction
+	var origin: Vector3 = data.get("origin", Vector3.ZERO)
+	var direction: Vector3 = data.get("direction", Vector3.FORWARD).normalized()
+	var damage: float = data.get("damage", 25.0)
+	var spread: float = data.get("spread", 0.0)
+	var pellets: int = data.get("pellets", 1)  # For shotguns
 
-	# Validate origin is near player's weapon position
-	# (anti-cheat: can't shoot from across map)
+	# Validate origin is near player's weapon position (anti-cheat)
 	var player_pos: Vector3 = player.global_position
 	if origin.distance_to(player_pos) > 3.0:
-		return  # Suspicious
+		push_warning("[GameState] Suspicious shot origin from peer %d" % peer_id)
+		return
 
-	# Perform raycast
+	# Validate player is alive
+	var player_health: float = player.get("health") if player.has_method("get") else 100.0
+	if player_health <= 0:
+		return  # Dead players can't shoot
+
+	# Process each pellet (1 for rifles/pistols, multiple for shotguns)
+	for _pellet in range(pellets):
+		var pellet_dir := direction
+
+		# Apply server-side spread
+		if spread > 0.0:
+			pellet_dir = direction.rotated(Vector3.UP, randf_range(-spread, spread))
+			pellet_dir = pellet_dir.rotated(direction.cross(Vector3.UP).normalized(), randf_range(-spread, spread))
+
+		_perform_raycast_hit(peer_id, origin, pellet_dir, damage / pellets)
+
+
+## Perform single raycast and register hit (server-side)
+func _perform_raycast_hit(peer_id: int, origin: Vector3, direction: Vector3, damage: float) -> void:
+	if not world_node:
+		return
+
 	var space_state := world_node.get_world_3d().direct_space_state
 	var query := PhysicsRayQueryParameters3D.create(origin, origin + direction * 1000.0)
-	query.collision_mask = 0b00000111  # World, Players, Zombies
+	query.collision_mask = 0b00000111  # World (1), Players (2), Zombies (4)
+
+	# Exclude the shooter
+	if peer_id in players:
+		var player: Node3D = players[peer_id]
+		if player is CollisionObject3D:
+			query.exclude = [player.get_rid()]
 
 	var result := space_state.intersect_ray(query)
 
-	if result:
-		var collider: Node = result.collider
+	if not result:
+		return
 
-		# Check if hit zombie
-		if collider.is_in_group("zombies"):
-			var zombie_id: int = collider.get("zombie_id")
-			var damage: float = data.get("damage", 25.0)
-			_damage_zombie(zombie_id, damage, result.position)
+	var collider: Node = result.collider
+	var hit_position: Vector3 = result.position
+	var hit_normal: Vector3 = result.normal
+
+	# Build hit result
+	var hit_data := {
+		"shooter_id": peer_id,
+		"position": hit_position,
+		"normal": hit_normal,
+		"damage": damage,
+		"is_headshot": false,
+		"target_type": "world",
+		"target_id": -1,
+	}
+
+	# Check what we hit
+	if collider.is_in_group("zombies"):
+		var zombie_id: int = collider.get("zombie_id")
+		hit_data["target_type"] = "zombie"
+		hit_data["target_id"] = zombie_id
+
+		# Check for headshot (if zombie has head hitbox or use height check)
+		var zombie: Node3D = zombies.get(zombie_id)
+		if zombie:
+			var head_height: float = zombie.global_position.y + 1.5  # Approximate head height
+			if hit_position.y > head_height:
+				hit_data["is_headshot"] = true
+				damage *= 2.0  # Headshot multiplier
+				hit_data["damage"] = damage
+
+		_damage_zombie(zombie_id, damage, hit_position)
+
+	elif collider.is_in_group("players"):
+		# Friendly fire check (disabled by default)
+		var target_peer_id: int = collider.get("peer_id") if collider.has_method("get") else -1
+		if target_peer_id > 0 and target_peer_id != peer_id:
+			hit_data["target_type"] = "player"
+			hit_data["target_id"] = target_peer_id
+			# Uncomment to enable friendly fire:
+			# _damage_player(target_peer_id, damage, hit_position)
+
+	elif collider.is_in_group("props"):
+		var prop_id: int = collider.get("prop_id") if collider.has_method("get") else -1
+		hit_data["target_type"] = "prop"
+		hit_data["target_id"] = prop_id
+		# Props could take damage or apply impulse
+		if collider is RigidBody3D:
+			collider.apply_impulse(direction * damage * 0.5, hit_position - collider.global_position)
+
+	# Broadcast hit confirmation for effects
+	NetworkManager.broadcast_event.rpc("hit_confirmed", hit_data)
+	hit_confirmed.emit(peer_id, hit_data)
 
 
 ## Damage a zombie (server-side)
@@ -920,6 +1020,24 @@ func _damage_zombie(zombie_id: int, damage: float, hit_position: Vector3) -> voi
 
 	if zombie.has_method("take_damage"):
 		zombie.take_damage(damage, hit_position)
+
+	# Check if zombie died
+	var zombie_health: float = zombie.get("health") if zombie.has_method("get") else 0.0
+	if zombie_health <= 0:
+		kill_zombie(zombie_id)
+
+
+## Damage a player (server-side, for friendly fire if enabled)
+func _damage_player(target_peer_id: int, damage: float, hit_position: Vector3) -> void:
+	if target_peer_id not in players:
+		return
+
+	var player: Node3D = players[target_peer_id]
+	if not is_instance_valid(player):
+		return
+
+	if player.has_method("take_damage"):
+		player.take_damage(damage, hit_position)
 
 
 # ============================================

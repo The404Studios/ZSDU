@@ -29,6 +29,7 @@ HeadlessServer="*res://scripts/autoload/headless_server.gd"
 FriendSystem="*res://scripts/autoload/friend_system.gd"
 LobbySystem="*res://scripts/autoload/lobby_system.gd"
 EconomyService="*res://scripts/autoload/economy_service.gd"
+RaidManager="*res://scripts/autoload/raid_manager.gd"
 
 [display]
 
