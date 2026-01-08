@@ -100,11 +100,19 @@ func _build_snapshot() -> Dictionary:
 			"active": nail_data.active
 		}
 
+	# Prop states (includes held state for interpolation)
+	var prop_states := {}
+	for prop_id in props:
+		var prop: RigidBody3D = props[prop_id]
+		if is_instance_valid(prop) and prop.has_method("get_network_state"):
+			prop_states[prop_id] = prop.get_network_state()
+
 	return {
 		"tick": Engine.get_physics_frames(),
 		"players": player_states,
 		"zombies": zombie_states,
 		"nails": nail_states,
+		"props": prop_states,
 	}
 
 
@@ -138,6 +146,15 @@ func apply_snapshot(snapshot: Dictionary) -> void:
 			if nail_id in nails:
 				nails[nail_id].hp = snapshot.nails[nail_id_str].hp
 				nails[nail_id].active = snapshot.nails[nail_id_str].active
+
+	# Apply prop states
+	if "props" in snapshot:
+		for prop_id_str in snapshot.props:
+			var prop_id: int = int(prop_id_str)
+			if prop_id in props:
+				var prop: RigidBody3D = props[prop_id]
+				if is_instance_valid(prop) and prop.has_method("apply_network_state"):
+					prop.apply_network_state(snapshot.props[prop_id_str])
 
 
 ## Apply full game state (for late joiners)
@@ -173,6 +190,12 @@ func process_action_request(peer_id: int, action_type: String, action_data: Dict
 			_handle_prop_pickup(peer_id, action_data)
 		"drop_prop":
 			_handle_prop_drop(peer_id, action_data)
+		"throw_prop":
+			_handle_prop_throw(peer_id, action_data)
+		"hold_update":
+			_handle_prop_hold_update(peer_id, action_data)
+		"nail_while_holding":
+			_handle_nail_while_holding(peer_id, action_data)
 		"shoot":
 			_handle_shoot(peer_id, action_data)
 
@@ -199,6 +222,12 @@ func handle_event(event_type: String, event_data: Dictionary) -> void:
 		"wave_end":
 			current_phase = GamePhase.WAVE_INTERMISSION
 			wave_ended.emit(current_wave)
+		"prop_picked_up":
+			_handle_prop_picked_up_event(event_data)
+		"prop_dropped":
+			_handle_prop_dropped_event(event_data)
+		"prop_thrown":
+			_handle_prop_thrown_event(event_data)
 
 
 ## Called when a player disconnects
@@ -569,14 +598,178 @@ func get_nearest_nail(position: Vector3, max_distance: float = 3.0) -> int:
 
 ## Handle prop pickup (server-side)
 func _handle_prop_pickup(peer_id: int, data: Dictionary) -> void:
-	# TODO: Implement prop carrying
-	pass
+	var prop_id: int = data.get("prop_id", -1)
+	if prop_id < 0 or prop_id not in props:
+		return
+
+	var prop: RigidBody3D = props[prop_id]
+	if not is_instance_valid(prop):
+		return
+
+	# Delegate to prop's pickup method
+	if prop.has_method("pickup"):
+		var success: bool = prop.pickup(peer_id)
+		if success:
+			# Notify clients
+			NetworkManager.broadcast_event.rpc("prop_picked_up", {
+				"prop_id": prop_id,
+				"peer_id": peer_id,
+			})
 
 
 ## Handle prop drop (server-side)
 func _handle_prop_drop(peer_id: int, data: Dictionary) -> void:
-	# TODO: Implement prop dropping
-	pass
+	var prop_id: int = data.get("prop_id", -1)
+	if prop_id < 0 or prop_id not in props:
+		return
+
+	var prop: RigidBody3D = props[prop_id]
+	if not is_instance_valid(prop):
+		return
+
+	# Validate the peer owns this prop
+	if prop.has_method("get_holder"):
+		if prop.get_holder() != peer_id:
+			return  # Can't drop what you're not holding
+
+	# Delegate to prop's release method
+	if prop.has_method("release"):
+		prop.release()
+		# Notify clients
+		NetworkManager.broadcast_event.rpc("prop_dropped", {
+			"prop_id": prop_id,
+			"peer_id": peer_id,
+		})
+
+
+## Handle prop throw (server-side)
+func _handle_prop_throw(peer_id: int, data: Dictionary) -> void:
+	var prop_id: int = data.get("prop_id", -1)
+	if prop_id < 0 or prop_id not in props:
+		return
+
+	var prop: RigidBody3D = props[prop_id]
+	if not is_instance_valid(prop):
+		return
+
+	# Validate the peer owns this prop
+	if prop.has_method("get_holder"):
+		if prop.get_holder() != peer_id:
+			return
+
+	# Get throw direction
+	var direction: Vector3 = data.get("direction", Vector3.FORWARD)
+	direction = direction.normalized()
+
+	# Delegate to prop's throw method
+	if prop.has_method("throw_prop"):
+		prop.throw_prop(direction)
+		# Notify clients
+		NetworkManager.broadcast_event.rpc("prop_thrown", {
+			"prop_id": prop_id,
+			"peer_id": peer_id,
+			"direction": direction,
+		})
+
+
+## Handle hold update (rotation/distance changes while holding)
+func _handle_prop_hold_update(peer_id: int, data: Dictionary) -> void:
+	var prop_id: int = data.get("prop_id", -1)
+	if prop_id < 0 or prop_id not in props:
+		return
+
+	var prop: RigidBody3D = props[prop_id]
+	if not is_instance_valid(prop):
+		return
+
+	# Validate the peer owns this prop
+	if prop.has_method("get_holder"):
+		if prop.get_holder() != peer_id:
+			return
+
+	# Apply rotation delta
+	var rotation_delta: Vector3 = data.get("rotation_delta", Vector3.ZERO)
+	if rotation_delta.length() > 0.001:
+		if prop.has_method("apply_rotation_delta"):
+			prop.apply_rotation_delta(rotation_delta)
+
+	# Apply distance delta
+	var distance_delta: float = data.get("distance_delta", 0.0)
+	if abs(distance_delta) > 0.001:
+		if prop.has_method("adjust_hold_distance"):
+			prop.adjust_hold_distance(distance_delta)
+
+
+## Handle nail while holding (player places nail on held prop)
+func _handle_nail_while_holding(peer_id: int, data: Dictionary) -> void:
+	var prop_id: int = data.get("prop_id", -1)
+	if prop_id < 0 or prop_id not in props:
+		return
+
+	var prop: RigidBody3D = props[prop_id]
+	if not is_instance_valid(prop):
+		return
+
+	# Validate the peer owns this prop
+	if prop.has_method("get_holder"):
+		if prop.get_holder() != peer_id:
+			return
+
+	# Check if prop can accept another nail
+	if prop.has_method("can_accept_nail"):
+		if not prop.can_accept_nail():
+			return  # Max nails reached
+
+	# Validate nail placement
+	var nail_data := {
+		"prop_id": prop_id,
+		"surface_id": data.get("surface_id", -1),
+		"position": data.get("position", Vector3.ZERO),
+		"normal": data.get("normal", Vector3.UP),
+	}
+
+	if not _validate_nail_placement(peer_id, nail_data):
+		return
+
+	# Create the nail
+	var nail_id := _next_nail_id
+	_next_nail_id += 1
+
+	var full_nail_data := {
+		"id": nail_id,
+		"owner_id": peer_id,
+		"prop_id": prop_id,
+		"surface_id": nail_data.surface_id,
+		"position": nail_data.position,
+		"normal": nail_data.normal,
+		"hp": randf_range(80.0, 120.0),
+		"max_hp": 120.0,
+		"repair_count": 0,
+		"max_repairs": 3,
+		"active": true,
+	}
+
+	nails[nail_id] = full_nail_data
+
+	# Register nail with prop
+	if prop.has_method("register_nail"):
+		prop.register_nail(nail_id)
+
+	# Release the prop (nailing drops it)
+	if prop.has_method("release"):
+		prop.release()
+
+	# Create physics joint
+	_create_nail_joint(full_nail_data)
+
+	# Notify all clients
+	NetworkManager.broadcast_event.rpc("nail_created", full_nail_data)
+	NetworkManager.broadcast_event.rpc("prop_dropped", {
+		"prop_id": prop_id,
+		"peer_id": peer_id,
+	})
+
+	print("[GameState] Nail %d placed on prop %d by peer %d" % [nail_id, prop_id, peer_id])
 
 
 ## Register a prop (server-side)
@@ -588,6 +781,92 @@ func register_prop(prop: RigidBody3D) -> int:
 	props[prop_id] = prop
 
 	return prop_id
+
+
+# ============================================
+# PROP EVENTS (Client-Side)
+# ============================================
+
+## Handle prop pickup event (client-side)
+func _handle_prop_picked_up_event(event_data: Dictionary) -> void:
+	var prop_id: int = event_data.get("prop_id", -1)
+	var peer_id: int = event_data.get("peer_id", -1)
+
+	if prop_id < 0 or prop_id not in props:
+		return
+
+	var prop: RigidBody3D = props[prop_id]
+	if not is_instance_valid(prop):
+		return
+
+	# Update local prop state
+	prop.set("held_by_peer", peer_id)
+	prop.set("current_mode", 1)  # PropMode.HELD
+	prop.freeze = true
+
+	# Notify local player's PropHandler if it's their pickup
+	var local_peer := multiplayer.get_unique_id()
+	if peer_id == local_peer and local_peer in players:
+		var player: Node3D = players[local_peer]
+		if player and player.has_method("get_prop_handler"):
+			var handler = player.get_prop_handler()
+			if handler and handler.has_method("on_pickup_confirmed"):
+				handler.on_pickup_confirmed(prop_id)
+
+
+## Handle prop dropped event (client-side)
+func _handle_prop_dropped_event(event_data: Dictionary) -> void:
+	var prop_id: int = event_data.get("prop_id", -1)
+	var peer_id: int = event_data.get("peer_id", -1)
+
+	if prop_id < 0 or prop_id not in props:
+		return
+
+	var prop: RigidBody3D = props[prop_id]
+	if not is_instance_valid(prop):
+		return
+
+	# Update local prop state
+	prop.set("held_by_peer", -1)
+	# Mode will be set by apply_network_state based on nails
+	prop.freeze = false
+
+	# Notify local player's PropHandler if it was their prop
+	var local_peer := multiplayer.get_unique_id()
+	if peer_id == local_peer and local_peer in players:
+		var player: Node3D = players[local_peer]
+		if player and player.has_method("get_prop_handler"):
+			var handler = player.get_prop_handler()
+			if handler and handler.has_method("on_drop_confirmed"):
+				handler.on_drop_confirmed()
+
+
+## Handle prop thrown event (client-side)
+func _handle_prop_thrown_event(event_data: Dictionary) -> void:
+	var prop_id: int = event_data.get("prop_id", -1)
+	var peer_id: int = event_data.get("peer_id", -1)
+	var direction: Vector3 = event_data.get("direction", Vector3.FORWARD)
+
+	if prop_id < 0 or prop_id not in props:
+		return
+
+	var prop: RigidBody3D = props[prop_id]
+	if not is_instance_valid(prop):
+		return
+
+	# Update local prop state
+	prop.set("held_by_peer", -1)
+	prop.set("current_mode", 0)  # PropMode.FREE
+	prop.freeze = false
+
+	# Notify local player's PropHandler if it was their prop
+	var local_peer := multiplayer.get_unique_id()
+	if peer_id == local_peer and local_peer in players:
+		var player: Node3D = players[local_peer]
+		if player and player.has_method("get_prop_handler"):
+			var handler = player.get_prop_handler()
+			if handler and handler.has_method("on_drop_confirmed"):
+				handler.on_drop_confirmed()
 
 
 # ============================================
