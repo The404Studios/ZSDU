@@ -50,6 +50,13 @@ var input_sequence := 0
 var current_weapon_slot := 0
 var inventory: Array[Node] = []
 
+# Prop handling
+var prop_handler: PropHandler = null
+
+# Network interpolation (for remote players)
+var _interpolator: NetworkInterpolator = null
+var _last_interp_tick: int = 0
+
 
 func _ready() -> void:
 	# Determine if this is our local player
@@ -64,9 +71,17 @@ func _ready() -> void:
 		# Hide own mesh (first person)
 		if mesh:
 			mesh.visible = false
+
+		# Initialize prop handler for local player
+		prop_handler = PropHandler.new()
+		add_child(prop_handler)
+		prop_handler.initialize(self)
 	else:
 		# Disable camera for remote players
 		camera.current = false
+
+		# Initialize interpolator for remote players
+		_interpolator = NetworkInterpolator.new()
 
 	# Initialize health
 	health = max_health
@@ -282,13 +297,29 @@ func _reconcile_with_server(state: Dictionary) -> void:
 
 ## Interpolate remote player to state
 func _interpolate_to_state(state: Dictionary) -> void:
-	# Smooth position interpolation
-	var target_pos: Vector3 = state.pos
-	global_position = global_position.lerp(target_pos, 0.5)
+	if _interpolator:
+		# Use jitter-buffered interpolation
+		var tick: int = state.get("tick", _last_interp_tick + 1)
+		_interpolator.push_state(
+			tick,
+			state.pos,
+			Vector3(state.get("pitch", 0), state.get("rot", 0), 0),
+			state.get("vel", Vector3.ZERO)
+		)
 
-	# Apply rotation
-	rotation.y = state.get("rot", rotation.y)
-	camera_pivot.rotation.x = state.get("pitch", camera_pivot.rotation.x)
+		var interp_state := _interpolator.get_interpolated_state(tick)
+		if not interp_state.is_empty():
+			global_position = interp_state.position
+			rotation.y = interp_state.rotation.y
+			camera_pivot.rotation.x = interp_state.rotation.x
+
+		_last_interp_tick = tick
+	else:
+		# Fallback: direct lerp
+		var target_pos: Vector3 = state.pos
+		global_position = global_position.lerp(target_pos, 0.5)
+		rotation.y = state.get("rot", rotation.y)
+		camera_pivot.rotation.x = state.get("pitch", camera_pivot.rotation.x)
 
 	# Apply state
 	health = state.get("health", health)
@@ -296,16 +327,26 @@ func _interpolate_to_state(state: Dictionary) -> void:
 	is_sprinting = state.get("sprinting", is_sprinting)
 
 
-## Handle primary action (shoot/hammer)
+## Handle primary action (shoot/hammer/nail)
 func _handle_primary_action() -> void:
+	# If holding a prop, primary action = nail
+	if prop_handler and prop_handler.is_holding:
+		prop_handler.handle_primary_action()
+		return
+
 	# Get current weapon and trigger
 	var weapon := _get_current_weapon()
 	if weapon and weapon.has_method("primary_action"):
 		weapon.primary_action()
 
 
-## Handle secondary action (aim/alt fire)
+## Handle secondary action (aim/alt fire/throw)
 func _handle_secondary_action() -> void:
+	# If holding a prop, secondary action = throw
+	if prop_handler and prop_handler.is_holding:
+		prop_handler.handle_secondary_action()
+		return
+
 	var weapon := _get_current_weapon()
 	if weapon and weapon.has_method("secondary_action"):
 		weapon.secondary_action()
@@ -313,6 +354,11 @@ func _handle_secondary_action() -> void:
 
 ## Handle interact (pickup props, use objects)
 func _handle_interact() -> void:
+	# Check if player is holding a prop - handle via prop handler
+	if prop_handler and prop_handler.is_holding:
+		prop_handler.handle_interact()
+		return
+
 	# Raycast to find interactable
 	if not camera:
 		return
@@ -328,6 +374,10 @@ func _handle_interact() -> void:
 
 	if result and result.collider.has_method("interact"):
 		result.collider.interact(self)
+	elif result and result.collider is BarricadeProp:
+		# Prop pickup via interact
+		if prop_handler:
+			prop_handler.handle_interact()
 
 
 ## Get currently equipped weapon
@@ -379,3 +429,20 @@ func get_camera() -> Camera3D:
 ## Get camera pivot for weapon attachment
 func get_camera_pivot() -> Node3D:
 	return camera_pivot
+
+
+## Get prop handler for prop interaction
+func get_prop_handler() -> PropHandler:
+	return prop_handler
+
+
+## Check if player is holding a prop
+func is_holding_prop() -> bool:
+	return prop_handler != null and prop_handler.is_holding
+
+
+## Get ID of held prop (-1 if not holding)
+func get_held_prop_id() -> int:
+	if prop_handler:
+		return prop_handler.held_prop_id
+	return -1
