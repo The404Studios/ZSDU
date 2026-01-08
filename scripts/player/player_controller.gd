@@ -52,6 +52,9 @@ func _ready() -> void:
 	peer_id = get_multiplayer_authority()
 	is_local_player = peer_id == multiplayer.get_unique_id()
 
+	# Add to players group for collision detection
+	add_to_group("players")
+
 	_setup_controllers()
 	_setup_local_player()
 
