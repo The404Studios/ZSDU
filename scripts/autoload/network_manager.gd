@@ -162,10 +162,22 @@ func _start_enet_server(port: int, max_clients: int) -> Error:
 	print("[Server] Started on port %d" % port)
 	server_started.emit()
 
-	# Server counts as a player too (listen server)
-	_register_player(1, "Host")
+	# Only register host as player in listen server mode (not dedicated/headless)
+	if not _is_dedicated_server():
+		_register_player(1, "Host")
 
 	return OK
+
+
+## Check if running as dedicated server (headless mode)
+func _is_dedicated_server() -> bool:
+	# Check command line args
+	var args := OS.get_cmdline_args()
+	for arg in args:
+		if arg == "--headless" or arg == "--server":
+			return true
+	# Check display server
+	return DisplayServer.get_name() == "headless"
 
 
 # ============================================
@@ -320,6 +332,11 @@ func get_session_id() -> String:
 
 func get_connection_state() -> ConnectionState:
 	return current_state
+
+
+## Returns true if running as dedicated server (headless mode)
+func is_dedicated_server() -> bool:
+	return _is_dedicated_server()
 
 
 # ============================================

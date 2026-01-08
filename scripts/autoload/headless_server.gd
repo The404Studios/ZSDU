@@ -285,9 +285,8 @@ func _schedule_ready_retry() -> void:
 # ============================================
 
 func _on_player_joined(peer_id: int) -> void:
-	# Don't count the server itself (peer_id 1 in listen server mode)
-	# For dedicated servers, all connections are players
-	if peer_id == 1 and not is_headless:
+	# peer_id 1 is always the server, not a real player
+	if peer_id == 1:
 		return
 
 	player_count = _get_real_player_count()
@@ -296,6 +295,10 @@ func _on_player_joined(peer_id: int) -> void:
 
 
 func _on_player_left(peer_id: int) -> void:
+	# peer_id 1 is always the server, not a real player
+	if peer_id == 1:
+		return
+
 	player_count = _get_real_player_count()
 	print("[HeadlessServer] Player left (peer=%d), count=%d" % [peer_id, player_count])
 
@@ -304,13 +307,12 @@ func _on_player_left(peer_id: int) -> void:
 
 
 func _get_real_player_count() -> int:
-	# Get actual connected peer count from NetworkManager
+	# Get connected peers, subtract 1 for server (peer_id 1)
 	var peers := NetworkManager.get_peer_ids()
-	# Subtract 1 for the server itself if it's in the list
 	var count := peers.size()
 	if 1 in peers:
 		count -= 1
-	return count
+	return maxi(0, count)
 
 
 # ============================================

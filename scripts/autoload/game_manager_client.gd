@@ -4,44 +4,29 @@ extends Node
 ## Provides:
 ## - Simple /match/find for quick matchmaking
 ## - Server list via /servers
-## - Status checks via /status
+## - Status checks via /status and /health
 ##
 ## This is the primary matchmaking client for production use.
-## TraversalClient is for session discovery/legacy support.
+## TraversalClient is for LAN session discovery.
 
-signal authenticated(session_id: String)
 signal match_found(server_info: Dictionary)
-signal matchmaking_started(ticket_id: String)
-signal matchmaking_cancelled()
-signal matchmaking_status_updated(status: String, wait_time: float)
 signal server_list_received(servers: Array)
 signal connection_error(message: String)
-signal websocket_connected()
-signal websocket_disconnected()
+signal status_received(status: Dictionary)
 
-# API Configuration (override via environment or config)
-var api_host := "localhost"
+# API Configuration (override via environment)
+# Uses same env vars as HeadlessServer for consistency
+var api_host := "127.0.0.1"
 var api_port := 8080
-var ws_port := 8081
 var use_ssl := false
 
-# Connection state
+# HTTP client
 var _http_request: HTTPRequest = null
-var _websocket: WebSocketPeer = null
-var _ws_connected := false
-var _ws_reconnect_timer := 0.0
-var _ws_heartbeat_timer := 0.0
 
-# Session state
+# Player state (set before matchmaking)
 var player_id := ""
-var player_name := ""
-var session_id := ""
-var matchmaking_ticket_id := ""
-var is_authenticated := false
 
 # Constants
-const WS_RECONNECT_INTERVAL := 5.0
-const WS_HEARTBEAT_INTERVAL := 30.0
 const HTTP_TIMEOUT := 10.0
 
 
@@ -51,33 +36,27 @@ func _ready() -> void:
 	_http_request.timeout = HTTP_TIMEOUT
 	add_child(_http_request)
 
-	# Load config from environment/settings
+	# Load config from environment
 	_load_config()
 
 
-func _process(delta: float) -> void:
-	_process_websocket(delta)
-
-
 func _load_config() -> void:
-	# Try to load from environment or project settings
-	var env_host := OS.get_environment("GAME_MANAGER_HOST")
+	# Same env vars as HeadlessServer for consistency
+	var env_host := OS.get_environment("BACKEND_HOST")
 	if env_host != "":
 		api_host = env_host
 
-	var env_port := OS.get_environment("GAME_MANAGER_PORT")
+	var env_port := OS.get_environment("BACKEND_PORT")
 	if env_port != "":
 		api_port = int(env_port)
 
-	var env_ws_port := OS.get_environment("GAME_MANAGER_WS_PORT")
-	if env_ws_port != "":
-		ws_port = int(env_ws_port)
+	use_ssl = OS.get_environment("BACKEND_SSL") == "true"
 
-	use_ssl = OS.get_environment("GAME_MANAGER_SSL") == "true"
+	print("[GameManager] Backend: %s://%s:%d" % ["https" if use_ssl else "http", api_host, api_port])
 
 
 # ============================================
-# HTTP API
+# HTTP HELPERS
 # ============================================
 
 func _get_api_url(endpoint: String) -> String:
@@ -85,12 +64,6 @@ func _get_api_url(endpoint: String) -> String:
 	return "%s://%s:%d%s" % [protocol, api_host, api_port, endpoint]
 
 
-func _get_ws_url() -> String:
-	var protocol := "wss" if use_ssl else "ws"
-	return "%s://%s:%d/" % [protocol, api_host, ws_port]
-
-
-## Make an HTTP request
 func _http_request_async(method: HTTPClient.Method, endpoint: String, body: Dictionary = {}) -> Dictionary:
 	var url := _get_api_url(endpoint)
 	var headers := ["Content-Type: application/json"]
@@ -107,6 +80,11 @@ func _http_request_async(method: HTTPClient.Method, endpoint: String, body: Dict
 		return {"error": "HTTP error: %d" % result[0]}
 
 	if result[1] < 200 or result[1] >= 300:
+		# Try to parse error from body
+		var body_text: String = result[3].get_string_from_utf8()
+		var json := JSON.new()
+		if json.parse(body_text) == OK and json.data is Dictionary:
+			return json.data
 		return {"error": "HTTP %d" % result[1], "status_code": result[1]}
 
 	var json := JSON.new()
@@ -117,37 +95,49 @@ func _http_request_async(method: HTTPClient.Method, endpoint: String, body: Dict
 	return json.data if json.data is Dictionary else {"data": json.data}
 
 
-## Get server status
+# ============================================
+# STATUS ENDPOINTS
+# ============================================
+
+## GET /health - Simple health check
+func get_health() -> Dictionary:
+	return await _http_request_async(HTTPClient.METHOD_GET, "/health")
+
+
+## GET /status - Full server status with stats
 func get_status() -> Dictionary:
-	return await _http_request_async(HTTPClient.METHOD_GET, "/status")
+	var result = await _http_request_async(HTTPClient.METHOD_GET, "/status")
+	if not result.has("error"):
+		status_received.emit(result)
+	return result
 
 
-## Get server list (from backend /servers endpoint)
+## GET /servers - List all game servers
 func get_servers() -> Array:
 	var result = await _http_request_async(HTTPClient.METHOD_GET, "/servers")
 	if result.has("error"):
 		connection_error.emit(result.error)
 		return []
 
-	# Result might be wrapped or direct array
+	# Result is an array wrapped or direct
 	var servers: Array = []
-	if result is Array:
-		servers = result
-	elif result.has("data") and result.data is Array:
+	if result.has("data") and result.data is Array:
 		servers = result.data
+	elif result is Array:
+		servers = result
 
 	server_list_received.emit(servers)
 	return servers
 
 
 # ============================================
-# SIMPLE MATCHMAKING (MVP)
+# MATCHMAKING
 # ============================================
 
-## Find a match - The primary matchmaking function
-## Calls POST /match/find and returns server connection info
+## POST /match/find - Find or create a match
 ## Returns: { matchId, status, serverHost, serverPort, gameMode } or { error }
 func find_match(p_player_id: String, game_mode: String = "survival") -> Dictionary:
+	player_id = p_player_id
 	print("[GameManager] Finding match for player: %s (mode: %s)" % [p_player_id, game_mode])
 
 	var result = await _http_request_async(HTTPClient.METHOD_POST, "/match/find", {
@@ -156,7 +146,7 @@ func find_match(p_player_id: String, game_mode: String = "survival") -> Dictiona
 	})
 
 	if result.has("error"):
-		connection_error.emit(result.error)
+		connection_error.emit(result.get("error", "Unknown error"))
 		return result
 
 	var status: String = result.get("status", "unknown")
@@ -177,16 +167,22 @@ func find_match(p_player_id: String, game_mode: String = "survival") -> Dictiona
 
 		"unavailable":
 			print("[GameManager] No servers available")
-			connection_error.emit("No servers available")
+			connection_error.emit("No servers available - try again later")
 
 		"error":
-			print("[GameManager] Matchmaking error: %s" % result.get("error", "unknown"))
-			connection_error.emit(result.get("error", "Matchmaking failed"))
+			var error_msg: String = result.get("error", "Matchmaking failed")
+			print("[GameManager] Matchmaking error: %s" % error_msg)
+			connection_error.emit(error_msg)
 
 	return result
 
 
-## Quick play - Find match and connect automatically
+## GET /match/{id} - Get match status
+func get_match(match_id: String) -> Dictionary:
+	return await _http_request_async(HTTPClient.METHOD_GET, "/match/" + match_id)
+
+
+## Quick play - Find match and connect automatically via NetworkManager
 func quick_play(p_player_id: String, game_mode: String = "survival") -> void:
 	var result = await find_match(p_player_id, game_mode)
 
@@ -203,312 +199,16 @@ func quick_play(p_player_id: String, game_mode: String = "survival") -> void:
 
 
 # ============================================
-# LEGACY MATCHMAKING (for complex flows)
+# SERVER BROWSER (future)
 # ============================================
 
-## Create player session (legacy - not needed for simple /match/find)
-func create_session(p_player_id: String, p_player_name: String) -> Dictionary:
-	player_id = p_player_id
-	player_name = p_player_name
-
-	var result = await _http_request_async(HTTPClient.METHOD_POST, "/api/sessions", {
-		"playerId": p_player_id,
-		"playerName": p_player_name
-	})
-
-	if result.has("error"):
-		connection_error.emit(result.error)
-		return result
-
-	session_id = result.get("id", "")
-	is_authenticated = true
-	authenticated.emit(session_id)
-
-	return result
-
-
-## Start matchmaking
-func start_matchmaking(game_mode: String = "survival", region: String = "") -> Dictionary:
-	if not is_authenticated:
-		return {"error": "Not authenticated"}
-
-	var body := {
-		"playerId": player_id,
-		"gameMode": game_mode
-	}
-	if region != "":
-		body["preferredRegion"] = region
-
-	var result = await _http_request_async(HTTPClient.METHOD_POST, "/api/matchmaking", body)
-
-	if result.has("error"):
-		connection_error.emit(result.error)
-		return result
-
-	matchmaking_ticket_id = result.get("id", "")
-	matchmaking_started.emit(matchmaking_ticket_id)
-
-	# Start polling for status
-	_poll_matchmaking_status()
-
-	return result
-
-
-## Check matchmaking status
-func get_matchmaking_status() -> Dictionary:
-	if matchmaking_ticket_id == "":
-		return {"error": "No active matchmaking ticket"}
-
-	var result = await _http_request_async(HTTPClient.METHOD_GET, "/api/matchmaking/" + matchmaking_ticket_id)
-
-	if result.has("error"):
-		return result
-
-	var status: String = result.get("status", "unknown")
-	var wait_time: float = result.get("waitTimeSeconds", 0.0)
-
-	matchmaking_status_updated.emit(status, wait_time)
-
-	# Check if match found
-	if status == "matched" and result.has("connection"):
-		var connection: Dictionary = result.connection
-		match_found.emit({
-			"server_id": connection.get("serverId", ""),
-			"host": connection.get("host", ""),
-			"port": connection.get("port", 27015)
-		})
-		matchmaking_ticket_id = ""
-
-	return result
-
-
-## Cancel matchmaking
-func cancel_matchmaking() -> Dictionary:
-	if matchmaking_ticket_id == "":
-		return {"error": "No active matchmaking ticket"}
-
-	var result = await _http_request_async(HTTPClient.METHOD_DELETE, "/api/matchmaking/" + matchmaking_ticket_id)
-
-	matchmaking_ticket_id = ""
-	matchmaking_cancelled.emit()
-
-	return result
-
-
-## Poll matchmaking status periodically
-func _poll_matchmaking_status() -> void:
-	while matchmaking_ticket_id != "":
-		await get_tree().create_timer(2.0).timeout
-
-		if matchmaking_ticket_id == "":
-			break
-
-		var status = await get_matchmaking_status()
-		if status.has("error") or status.get("status", "") in ["matched", "cancelled", "timed_out"]:
-			break
-
-
-# ============================================
-# WEBSOCKET
-# ============================================
-
-## Connect to WebSocket for real-time updates
-func connect_websocket() -> Error:
-	if _websocket != null:
-		_websocket.close()
-
-	_websocket = WebSocketPeer.new()
-	var error := _websocket.connect_to_url(_get_ws_url())
-
-	if error != OK:
-		connection_error.emit("WebSocket connection failed: %s" % error_string(error))
-		return error
-
-	print("[GameManager] Connecting to WebSocket: %s" % _get_ws_url())
-	return OK
-
-
-## Disconnect WebSocket
-func disconnect_websocket() -> void:
-	if _websocket:
-		_websocket.close()
-		_websocket = null
-
-	_ws_connected = false
-	websocket_disconnected.emit()
-
-
-## Process WebSocket messages
-func _process_websocket(delta: float) -> void:
-	if _websocket == null:
-		# Auto-reconnect logic
-		if is_authenticated and not _ws_connected:
-			_ws_reconnect_timer += delta
-			if _ws_reconnect_timer >= WS_RECONNECT_INTERVAL:
-				_ws_reconnect_timer = 0.0
-				connect_websocket()
-		return
-
-	_websocket.poll()
-
-	var state := _websocket.get_ready_state()
-
-	match state:
-		WebSocketPeer.STATE_OPEN:
-			if not _ws_connected:
-				_ws_connected = true
-				_on_websocket_connected()
-
-			# Process incoming messages
-			while _websocket.get_available_packet_count() > 0:
-				var packet := _websocket.get_packet()
-				_handle_websocket_message(packet.get_string_from_utf8())
-
-			# Heartbeat
-			_ws_heartbeat_timer += delta
-			if _ws_heartbeat_timer >= WS_HEARTBEAT_INTERVAL:
-				_ws_heartbeat_timer = 0.0
-				_send_websocket_message("ping", {})
-
-		WebSocketPeer.STATE_CLOSING:
-			pass
-
-		WebSocketPeer.STATE_CLOSED:
-			var code := _websocket.get_close_code()
-			print("[GameManager] WebSocket closed with code: %d" % code)
-			_websocket = null
-			_ws_connected = false
-			_ws_reconnect_timer = 0.0
-			websocket_disconnected.emit()
-
-
-func _on_websocket_connected() -> void:
-	print("[GameManager] WebSocket connected")
-	websocket_connected.emit()
-
-	# Authenticate
-	if player_id != "":
-		_send_websocket_message("authenticate", {
-			"playerId": player_id,
-			"playerName": player_name
-		})
-
-
-func _send_websocket_message(msg_type: String, data: Dictionary) -> void:
-	if _websocket == null or not _ws_connected:
-		return
-
-	var message := {
-		"type": msg_type,
-		"data": data
-	}
-
-	_websocket.send_text(JSON.stringify(message))
-
-
-func _handle_websocket_message(json_str: String) -> void:
-	var json := JSON.new()
-	var error := json.parse(json_str)
-	if error != OK:
-		return
-
-	var message: Dictionary = json.data
-	var msg_type: String = message.get("type", "")
-	var data: Dictionary = message.get("data", {})
-
-	match msg_type:
-		"connected":
-			print("[GameManager] WebSocket session: %s" % data.get("clientId", ""))
-
-		"authenticated":
-			print("[GameManager] WebSocket authenticated")
-
-		"match_found":
-			var server_info := {
-				"server_id": data.get("server", {}).get("id", ""),
-				"host": data.get("server", {}).get("host", ""),
-				"port": data.get("server", {}).get("port", 27015),
-				"game_mode": data.get("server", {}).get("gameMode", "survival"),
-				"map_name": data.get("server", {}).get("mapName", "default")
-			}
-			match_found.emit(server_info)
-			matchmaking_ticket_id = ""
-
-		"matchmaking_started":
-			matchmaking_ticket_id = data.get("ticketId", "")
-			matchmaking_started.emit(matchmaking_ticket_id)
-
-		"matchmaking_cancelled":
-			matchmaking_ticket_id = ""
-			matchmaking_cancelled.emit()
-
-		"matchmaking_status":
-			var status: String = data.get("status", "unknown")
-			var wait_time: float = data.get("waitTime", 0.0)
-			matchmaking_status_updated.emit(status, wait_time)
-
-		"server_status_changed":
-			# Could emit a signal for UI updates
-			pass
-
-		"pong":
-			pass  # Heartbeat response
-
-		"error":
-			connection_error.emit(data.get("message", "Unknown error"))
-
-
-# ============================================
-# WEBSOCKET MATCHMAKING
-# ============================================
-
-## Start matchmaking via WebSocket (real-time updates)
-func start_matchmaking_ws(game_mode: String = "survival", region: String = "") -> void:
-	if not _ws_connected:
-		var error := connect_websocket()
-		if error != OK:
-			return
-		await websocket_connected
-
-	var data := {"gameMode": game_mode}
-	if region != "":
-		data["preferredRegion"] = region
-
-	_send_websocket_message("matchmaking_start", data)
-
-
-## Cancel matchmaking via WebSocket
-func cancel_matchmaking_ws() -> void:
-	_send_websocket_message("matchmaking_cancel", {})
-
-
-## Get matchmaking status via WebSocket
-func request_matchmaking_status_ws() -> void:
-	_send_websocket_message("matchmaking_status", {})
-
-
-# ============================================
-# CONVENIENCE
-# ============================================
-
-## Full authentication flow
-func authenticate(p_player_id: String, p_player_name: String) -> bool:
-	# Create HTTP session
-	var result = await create_session(p_player_id, p_player_name)
-	if result.has("error"):
-		return false
-
-	# Connect WebSocket for real-time updates
-	connect_websocket()
-
-	return true
-
-
-## Quick play - authenticate and start matchmaking
-func quick_play(p_player_id: String, p_player_name: String, game_mode: String = "survival") -> void:
-	if not is_authenticated:
-		var success = await authenticate(p_player_id, p_player_name)
-		if not success:
-			return
-
-	start_matchmaking_ws(game_mode)
+## Get available servers for manual selection
+func get_available_servers() -> Array:
+	var all_servers = await get_servers()
+	return all_servers.filter(func(s): return s.get("status") == "ready")
+
+
+## Join a specific server directly
+func join_server_direct(host: String, port: int) -> void:
+	print("[GameManager] Direct connect to %s:%d" % [host, port])
+	NetworkManager.join_server(host, port)
