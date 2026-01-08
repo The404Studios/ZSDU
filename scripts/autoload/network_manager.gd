@@ -298,8 +298,24 @@ func _on_connected_to_server() -> void:
 	awaiting_sync = true
 	sync_timer = 0.0
 
-	# Request registration
-	_request_registration.rpc_id(1, "Player_%d" % local_peer_id)
+	# Get player info from FriendSystem (for identification) and LobbySystem (for spawn)
+	var player_id: String = ""
+	var player_name: String = "Player_%d" % local_peer_id
+	var spawn_group: String = ""
+	var spawn_index: int = 0
+
+	if FriendSystem:
+		player_id = FriendSystem.get_player_id()
+		if FriendSystem.local_player_name != "":
+			player_name = FriendSystem.local_player_name
+
+	if LobbySystem:
+		var spawn_info := LobbySystem.get_spawn_assignment()
+		spawn_group = spawn_info.get("group", "")
+		spawn_index = spawn_info.get("index", 0)
+
+	# Request registration with full player info
+	_request_registration.rpc_id(1, player_name, player_id, spawn_group, spawn_index)
 
 
 func _on_connection_failed() -> void:
@@ -477,11 +493,24 @@ func _serialize_nails() -> Array:
 # ============================================
 
 @rpc("any_peer", "reliable")
-func _request_registration(username: String) -> void:
+func _request_registration(username: String, player_id: String = "", spawn_group: String = "", spawn_index: int = 0) -> void:
 	if not is_authority():
 		return
 
 	var sender_id := multiplayer.get_remote_sender_id()
+
+	# Register player spawn info with HeadlessServer (for group spawning)
+	if HeadlessServer and HeadlessServer.is_headless:
+		if player_id != "":
+			# Map player_id to peer_id for spawn lookup
+			HeadlessServer.player_spawn_registry[sender_id] = {
+				"group": spawn_group,
+				"index": spawn_index
+			}
+			print("[Server] Registered spawn for peer %d: player=%s, group=%s, index=%d" % [
+				sender_id, player_id, spawn_group, spawn_index
+			])
+
 	_register_player(sender_id, username)
 	_confirm_registration.rpc_id(sender_id, sender_id, username)
 

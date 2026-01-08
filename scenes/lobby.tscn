@@ -1,0 +1,183 @@
+[gd_scene load_steps=2 format=3 uid="uid://clobby123"]
+
+[ext_resource type="Script" path="res://scripts/ui/lobby.gd" id="1_lobby"]
+
+[node name="Lobby" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_lobby")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+color = Color(0.1, 0.1, 0.15, 1)
+
+[node name="MainContainer" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -400.0
+offset_top = -300.0
+offset_right = 400.0
+offset_bottom = 300.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 15
+
+[node name="Header" type="HBoxContainer" parent="MainContainer"]
+layout_mode = 2
+
+[node name="LobbyNameLabel" type="Label" parent="MainContainer/Header"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 28
+text = "Lobby: "
+
+[node name="LeaveButton" type="Button" parent="MainContainer/Header"]
+custom_minimum_size = Vector2(120, 40)
+layout_mode = 2
+text = "Leave"
+
+[node name="Separator" type="HSeparator" parent="MainContainer"]
+layout_mode = 2
+
+[node name="ContentContainer" type="HBoxContainer" parent="MainContainer"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_constants/separation = 30
+
+[node name="PlayersPanel" type="PanelContainer" parent="MainContainer/ContentContainer"]
+custom_minimum_size = Vector2(350, 0)
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="PlayersVBox" type="VBoxContainer" parent="MainContainer/ContentContainer/PlayersPanel"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="PlayersTitle" type="Label" parent="MainContainer/ContentContainer/PlayersPanel/PlayersVBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "Players"
+horizontal_alignment = 1
+
+[node name="PlayersList" type="VBoxContainer" parent="MainContainer/ContentContainer/PlayersPanel/PlayersVBox"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="SettingsPanel" type="PanelContainer" parent="MainContainer/ContentContainer"]
+custom_minimum_size = Vector2(350, 0)
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="SettingsVBox" type="VBoxContainer" parent="MainContainer/ContentContainer/SettingsPanel"]
+layout_mode = 2
+theme_override_constants/separation = 15
+
+[node name="SettingsTitle" type="Label" parent="MainContainer/ContentContainer/SettingsPanel/SettingsVBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 20
+text = "Game Settings"
+horizontal_alignment = 1
+
+[node name="GameModeContainer" type="HBoxContainer" parent="MainContainer/ContentContainer/SettingsPanel/SettingsVBox"]
+layout_mode = 2
+
+[node name="GameModeLabel" type="Label" parent="MainContainer/ContentContainer/SettingsPanel/SettingsVBox/GameModeContainer"]
+layout_mode = 2
+text = "Mode:"
+
+[node name="GameModeOption" type="OptionButton" parent="MainContainer/ContentContainer/SettingsPanel/SettingsVBox/GameModeContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+item_count = 3
+popup/item_0/text = "Survival"
+popup/item_1/text = "Endless"
+popup/item_1/id = 1
+popup/item_2/text = "Challenge"
+popup/item_2/id = 2
+
+[node name="MapContainer" type="HBoxContainer" parent="MainContainer/ContentContainer/SettingsPanel/SettingsVBox"]
+layout_mode = 2
+
+[node name="MapLabel" type="Label" parent="MainContainer/ContentContainer/SettingsPanel/SettingsVBox/MapContainer"]
+layout_mode = 2
+text = "Map:"
+
+[node name="MapOption" type="OptionButton" parent="MainContainer/ContentContainer/SettingsPanel/SettingsVBox/MapContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+item_count = 2
+popup/item_0/text = "Warehouse"
+popup/item_1/text = "House"
+popup/item_1/id = 1
+
+[node name="Spacer" type="Control" parent="MainContainer/ContentContainer/SettingsPanel/SettingsVBox"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="InviteContainer" type="HBoxContainer" parent="MainContainer/ContentContainer/SettingsPanel/SettingsVBox"]
+layout_mode = 2
+
+[node name="InviteCodeLabel" type="Label" parent="MainContainer/ContentContainer/SettingsPanel/SettingsVBox/InviteContainer"]
+layout_mode = 2
+text = "Lobby Code:"
+
+[node name="InviteCode" type="LineEdit" parent="MainContainer/ContentContainer/SettingsPanel/SettingsVBox/InviteContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+editable = false
+placeholder_text = "ABC123"
+
+[node name="CopyCodeButton" type="Button" parent="MainContainer/ContentContainer/SettingsPanel/SettingsVBox/InviteContainer"]
+layout_mode = 2
+text = "Copy"
+
+[node name="Separator2" type="HSeparator" parent="MainContainer"]
+layout_mode = 2
+
+[node name="BottomContainer" type="HBoxContainer" parent="MainContainer"]
+layout_mode = 2
+theme_override_constants/separation = 20
+
+[node name="ReadyButton" type="Button" parent="MainContainer/BottomContainer"]
+custom_minimum_size = Vector2(200, 50)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Ready"
+
+[node name="StartButton" type="Button" parent="MainContainer/BottomContainer"]
+custom_minimum_size = Vector2(200, 50)
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Start Game"
+
+[node name="CountdownLabel" type="Label" parent="MainContainer"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 48
+text = ""
+horizontal_alignment = 1
+
+[node name="StatusLabel" type="Label" parent="."]
+layout_mode = 1
+anchors_preset = 7
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -300.0
+offset_top = -40.0
+offset_right = 300.0
+grow_horizontal = 2
+grow_vertical = 0
+text = ""
+horizontal_alignment = 1
