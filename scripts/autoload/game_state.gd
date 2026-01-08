@@ -479,6 +479,12 @@ func _handle_nail_placement(peer_id: int, data: Dictionary) -> void:
 	# Create physics joint on server
 	_create_nail_joint(nail_data)
 
+	# Register nail with prop so it tracks attached nails
+	if data.prop_id in props:
+		var prop: BarricadeProp = props[data.prop_id] as BarricadeProp
+		if prop:
+			prop.register_nail(nail_id)
+
 	# Notify all clients
 	NetworkManager.broadcast_event.rpc("nail_created", nail_data)
 
@@ -619,6 +625,13 @@ func _destroy_nail(nail_id: int) -> void:
 
 	var nail: Dictionary = nails[nail_id]
 	nail.active = false
+
+	# Unregister nail from prop so it can update its state
+	var prop_id: int = nail.get("prop_id", -1)
+	if prop_id >= 0 and prop_id in props:
+		var prop: BarricadeProp = props[prop_id] as BarricadeProp
+		if prop:
+			prop.unregister_nail(nail_id)
 
 	# Destroy physics joint
 	if "joint_node" in nail and is_instance_valid(nail.joint_node):

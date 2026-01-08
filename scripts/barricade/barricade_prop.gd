@@ -336,6 +336,12 @@ func apply_network_state(state: Dictionary) -> void:
 	current_mode = new_mode
 	held_by_peer = state.get("holder", -1)
 
+	# Sync attached nails
+	var synced_nails: Array = state.get("nails", [])
+	attached_nail_ids.clear()
+	for nail_id in synced_nails:
+		attached_nail_ids.append(nail_id as int)
+
 	match current_mode:
 		PropMode.FREE, PropMode.NAILED:
 			# Interpolate physics state
