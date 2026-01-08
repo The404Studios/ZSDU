@@ -126,6 +126,7 @@ public class HttpApi
                 ("/lobby/ready", "POST") => await HandleLobbyReady(request),
                 ("/lobby/start", "POST") => await HandleLobbyStart(request),
                 ("/lobby/status", "POST") => await HandleLobbyStatus(request),
+                ("/lobby/claim_spawn", "POST") => await HandleLobbyClaimSpawn(request),
                 ("/lobby/list", "GET") => GetLobbyList(),
 
                 _ => null
@@ -260,7 +261,7 @@ public class HttpApi
                 {
                     matchId = existingMatch.Id,
                     status = "already_matched",
-                    serverHost = "162.248.94.149",  // Production server
+                    serverHost = _config.PublicHost,
                     serverPort = existingServer?.Port ?? 0
                 };
             }
@@ -308,7 +309,7 @@ public class HttpApi
         {
             matchId = match.Id,
             status = "matched",
-            serverHost = "162.248.94.149",  // Production server
+            serverHost = _config.PublicHost,
             serverPort = server.Port,
             gameMode = match.GameMode
         };
@@ -474,6 +475,7 @@ public class HttpApi
     // LOBBY SYSTEM
     // ============================================
 
+    // All lobby endpoints return { lobby: {...} } for consistency
     private async Task<object> HandleLobbyCreate(HttpListenerRequest request)
     {
         var body = await ReadBodyAsync<LobbyCreateRequest>(request);
@@ -488,7 +490,7 @@ public class HttpApi
             body.GameMode ?? "survival"
         );
 
-        return _lobbyService.ToResponse(lobby);
+        return new { lobby = _lobbyService.ToResponse(lobby) };
     }
 
     private async Task<object> HandleLobbyJoin(HttpListenerRequest request)
@@ -501,7 +503,7 @@ public class HttpApi
         if (lobby == null)
             return new { error = "Could not join lobby" };
 
-        return _lobbyService.ToResponse(lobby);
+        return new { lobby = _lobbyService.ToResponse(lobby) };
     }
 
     private async Task<object> HandleLobbyLeave(HttpListenerRequest request)
@@ -526,7 +528,7 @@ public class HttpApi
         if (lobby == null)
             return new { error = "Not in a lobby" };
 
-        return _lobbyService.ToResponse(lobby);
+        return new { lobby = _lobbyService.ToResponse(lobby) };
     }
 
     private async Task<object> HandleLobbyStart(HttpListenerRequest request)
@@ -560,8 +562,8 @@ public class HttpApi
                 return new { error = "Server failed to start", status = "error" };
         }
 
-        // Start the game
-        var success = _lobbyService.StartGame(body.PlayerId, body.LobbyId, "162.248.94.149", server.Port, server.Id);
+        // Start the game - use config.PublicHost (single source of truth)
+        var success = _lobbyService.StartGame(body.PlayerId, body.LobbyId, _config.PublicHost, server.Port, server.Id);
         if (!success)
             return new { error = "Cannot start game" };
 
@@ -577,7 +579,7 @@ public class HttpApi
         {
             success = true,
             matchId = match.Id,
-            serverHost = "162.248.94.149",
+            serverHost = _config.PublicHost,
             serverPort = server.Port,
             lobby = _lobbyService.ToResponse(lobby!)
         };
@@ -603,13 +605,42 @@ public class HttpApi
         if (lobby == null)
             return new { error = "Lobby not found" };
 
-        return _lobbyService.ToResponse(lobby);
+        return new { lobby = _lobbyService.ToResponse(lobby) };
     }
 
     private object GetLobbyList()
     {
         var lobbies = _lobbyService.GetPublicLobbies();
         return new { lobbies };
+    }
+
+    /// <summary>
+    /// POST /lobby/claim_spawn
+    /// Called by game server to get authoritative spawn assignment for a player
+    /// </summary>
+    private async Task<object> HandleLobbyClaimSpawn(HttpListenerRequest request)
+    {
+        var body = await ReadBodyAsync<LobbyClaimSpawnRequest>(request);
+        if (body == null || string.IsNullOrEmpty(body.LobbyId) || string.IsNullOrEmpty(body.PlayerId))
+            return new { error = "Invalid request" };
+
+        var lobby = _lobbyService.GetLobby(body.LobbyId);
+        if (lobby == null)
+            return new { error = "Lobby not found" };
+
+        // Find player in lobby
+        var player = lobby.Players.Find(p => p.Id == body.PlayerId);
+        if (player == null)
+            return new { error = "Player not in lobby" };
+
+        // Return server-authoritative spawn assignment
+        return new
+        {
+            playerId = player.Id,
+            groupName = lobby.Name,  // Use lobby name as group
+            spawnIndex = player.SpawnIndex,
+            lobbyId = lobby.Id
+        };
     }
 
     // ============================================
@@ -746,4 +777,10 @@ public class LobbyStatusRequest
 {
     public string? PlayerId { get; set; }
     public string? LobbyId { get; set; }
+}
+
+public class LobbyClaimSpawnRequest
+{
+    public string LobbyId { get; set; } = "";
+    public string PlayerId { get; set; } = "";
 }

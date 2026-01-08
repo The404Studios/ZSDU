@@ -298,11 +298,10 @@ func _on_connected_to_server() -> void:
 	awaiting_sync = true
 	sync_timer = 0.0
 
-	# Get player info from FriendSystem (for identification) and LobbySystem (for spawn)
+	# Get player identity and lobby info
 	var player_id: String = ""
 	var player_name: String = "Player_%d" % local_peer_id
-	var spawn_group: String = ""
-	var spawn_index: int = 0
+	var lobby_id: String = ""
 
 	if FriendSystem:
 		player_id = FriendSystem.get_player_id()
@@ -310,12 +309,15 @@ func _on_connected_to_server() -> void:
 			player_name = FriendSystem.local_player_name
 
 	if LobbySystem:
-		var spawn_info := LobbySystem.get_spawn_assignment()
-		spawn_group = spawn_info.get("group", "")
-		spawn_index = spawn_info.get("index", 0)
+		lobby_id = LobbySystem.get_lobby_id()
 
-	# Request registration with full player info
-	_request_registration.rpc_id(1, player_name, player_id, spawn_group, spawn_index)
+	# Request registration with dictionary payload (future-proof)
+	# Server is 100% authoritative for spawn assignment - client sends NO spawn info
+	_request_registration.rpc_id(1, {
+		"player_id": player_id,
+		"player_name": player_name,
+		"lobby_id": lobby_id
+	})
 
 
 func _on_connection_failed() -> void:
@@ -492,27 +494,86 @@ func _serialize_nails() -> Array:
 # RPCs
 # ============================================
 
+## Client registration RPC - uses dictionary payload for future-proofing
+## Server is 100% authoritative for spawn assignment
 @rpc("any_peer", "reliable")
-func _request_registration(username: String, player_id: String = "", spawn_group: String = "", spawn_index: int = 0) -> void:
+func _request_registration(client_info: Dictionary) -> void:
 	if not is_authority():
 		return
 
 	var sender_id := multiplayer.get_remote_sender_id()
 
-	# Register player spawn info with HeadlessServer (for group spawning)
-	if HeadlessServer and HeadlessServer.is_headless:
-		if player_id != "":
-			# Map player_id to peer_id for spawn lookup
-			HeadlessServer.player_spawn_registry[sender_id] = {
-				"group": spawn_group,
-				"index": spawn_index
-			}
-			print("[Server] Registered spawn for peer %d: player=%s, group=%s, index=%d" % [
-				sender_id, player_id, spawn_group, spawn_index
-			])
+	# Extract client-provided info (identity only, NO spawn data accepted)
+	var player_id: String = client_info.get("player_id", "")
+	var player_name: String = client_info.get("player_name", "Player_%d" % sender_id)
+	var lobby_id: String = client_info.get("lobby_id", "")
 
-	_register_player(sender_id, username)
-	_confirm_registration.rpc_id(sender_id, sender_id, username)
+	# Register player for spawn lookup
+	# Server will claim spawn from backend - client has NO say in spawn position
+	if HeadlessServer and HeadlessServer.is_headless:
+		HeadlessServer.player_spawn_registry[sender_id] = {
+			"player_id": player_id,
+			"lobby_id": lobby_id,
+			"group": "",   # Server-authoritative: set by backend only
+			"index": -1    # Server-authoritative: set by backend only
+		}
+		print("[Server] Registered player peer %d: player=%s, lobby=%s" % [
+			sender_id, player_id, lobby_id
+		])
+
+		# Claim spawn from backend (server-authoritative)
+		if lobby_id != "" and player_id != "":
+			_claim_spawn_async(sender_id, player_id, lobby_id)
+
+	_register_player(sender_id, player_name)
+	_confirm_registration.rpc_id(sender_id, sender_id, player_name)
+
+
+## Claim spawn assignment from backend (server-only)
+func _claim_spawn_async(peer_id: int, player_id: String, lobby_id: String) -> void:
+	if not HeadlessServer or not HeadlessServer.is_headless:
+		return
+
+	# Create HTTP request to backend
+	var http := HTTPRequest.new()
+	http.timeout = 5.0
+	add_child(http)
+
+	var url := BackendConfig.get_http_url() + "/lobby/claim_spawn"
+	var body := JSON.stringify({
+		"lobbyId": lobby_id,
+		"playerId": player_id
+	})
+	var headers := ["Content-Type: application/json"]
+
+	var error := http.request(url, headers, HTTPClient.METHOD_POST, body)
+	if error != OK:
+		http.queue_free()
+		push_warning("[Server] Failed to claim spawn for %s" % player_id)
+		return
+
+	var result = await http.request_completed
+	http.queue_free()
+
+	if result[0] != HTTPRequest.RESULT_SUCCESS or result[1] < 200 or result[1] >= 300:
+		push_warning("[Server] Claim spawn HTTP error for %s" % player_id)
+		return
+
+	var json := JSON.new()
+	if json.parse(result[3].get_string_from_utf8()) != OK:
+		return
+
+	var data: Dictionary = json.data if json.data is Dictionary else {}
+
+	# Update spawn registry with server-authoritative data
+	if peer_id in HeadlessServer.player_spawn_registry:
+		HeadlessServer.player_spawn_registry[peer_id]["group"] = data.get("groupName", "")
+		HeadlessServer.player_spawn_registry[peer_id]["index"] = data.get("spawnIndex", 0)
+		print("[Server] Claimed spawn for peer %d: group=%s, index=%d" % [
+			peer_id,
+			data.get("groupName", ""),
+			data.get("spawnIndex", 0)
+		])
 
 
 @rpc("authority", "reliable")

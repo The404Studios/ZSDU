@@ -6,7 +6,9 @@ extends Node
 ## - Group formation (leader + members)
 ## - Ready state management
 ## - Game start coordination
-## - Spawn point assignment (group vs solo)
+##
+## NOTE: Spawn assignment is SERVER-AUTHORITATIVE.
+## Client only stores what server tells it for UI display.
 ##
 ## Flow: Main Menu -> Lobby -> Game
 
@@ -31,8 +33,6 @@ enum LobbyState {
 }
 
 # Configuration
-const BACKEND_HOST := "162.248.94.149"
-const BACKEND_PORT := 8080
 const LOBBY_UPDATE_INTERVAL := 2.0
 const START_COUNTDOWN := 5
 
@@ -42,20 +42,16 @@ var current_lobby: Dictionary = {}
 var is_leader := false
 var local_player_ready := false
 
-# HTTP
-var _http: HTTPRequest = null
+# Update timer
 var _update_timer: Timer = null
 
-# Spawn assignment (set by server when game starts)
-var assigned_spawn_group: String = ""  # Group name or "solo"
+# Spawn assignment (display only - server is authoritative)
+# These are set when server confirms spawn, NOT by client
+var assigned_spawn_group: String = ""
 var assigned_spawn_index: int = 0
 
 
 func _ready() -> void:
-	_http = HTTPRequest.new()
-	_http.timeout = 10.0
-	add_child(_http)
-
 	_update_timer = Timer.new()
 	_update_timer.wait_time = LOBBY_UPDATE_INTERVAL
 	_update_timer.one_shot = false
@@ -88,8 +84,8 @@ func create_lobby(lobby_name: String, max_players: int = 4, game_mode: String = 
 		lobby_error.emit(result.error)
 		return
 
-	# API returns lobby data at root level
-	current_lobby = result
+	# API always returns { lobby: {...} }
+	current_lobby = result.get("lobby", {})
 	is_leader = true
 	current_state = LobbyState.IN_LOBBY
 
@@ -116,8 +112,8 @@ func join_lobby(lobby_id: String) -> void:
 		lobby_error.emit(result.error)
 		return
 
-	# API returns lobby data at root level
-	current_lobby = result
+	# API always returns { lobby: {...} }
+	current_lobby = result.get("lobby", {})
 	is_leader = current_lobby.get("leaderId") == FriendSystem.get_player_id()
 	current_state = LobbyState.IN_LOBBY
 
@@ -184,7 +180,7 @@ func start_game() -> void:
 		return
 
 	# Server info returned
-	var server_host: String = result.get("serverHost", BACKEND_HOST)
+	var server_host: String = result.get("serverHost", BackendConfig.get_game_server_host())
 	var server_port: int = result.get("serverPort", 27015)
 
 	# Start countdown
@@ -234,8 +230,8 @@ func _poll_lobby_updates() -> void:
 	if result.has("error"):
 		return
 
-	# API returns lobby data at root level
-	var new_lobby: Dictionary = result
+	# API always returns { lobby: {...} }
+	var new_lobby: Dictionary = result.get("lobby", {})
 
 	# Check for player changes
 	var old_players: Array = current_lobby.get("players", [])
@@ -266,7 +262,7 @@ func _poll_lobby_updates() -> void:
 
 	# Check for game start
 	if new_lobby.get("state") == "starting":
-		var server_host: String = new_lobby.get("serverHost", BACKEND_HOST)
+		var server_host: String = new_lobby.get("serverHost", BackendConfig.get_game_server_host())
 		var server_port: int = new_lobby.get("serverPort", 27015)
 		current_state = LobbyState.STARTING
 		_start_countdown(server_host, server_port)
@@ -288,19 +284,19 @@ func _start_countdown(server_host: String, server_port: int) -> void:
 		game_starting.emit(i)
 		await get_tree().create_timer(1.0).timeout
 
-	# Get spawn assignment from lobby data
-	assigned_spawn_group = current_lobby.get("groupName", "solo")
-	var players: Array = current_lobby.get("players", [])
-	for i in range(players.size()):
-		if players[i].get("id") == FriendSystem.get_player_id():
-			assigned_spawn_index = i
-			break
+	# NOTE: Spawn assignment is SERVER-AUTHORITATIVE
+	# We store lobby info for UI display, but server decides actual spawn
+	# The server will call set_spawn_assignment() when it confirms our spawn
+	assigned_spawn_group = current_lobby.get("name", "")  # Group name for UI only
+	assigned_spawn_index = -1  # Server will assign
 
 	current_state = LobbyState.IN_GAME
 	game_started.emit()
 
-	# Connect to game server
-	print("[Lobby] Connecting to game server %s:%d" % [server_host, server_port])
+	# Connect to game server - server will validate our lobbyId and assign spawn
+	print("[Lobby] Connecting to game server %s:%d (lobby: %s)" % [
+		server_host, server_port, current_lobby.get("id", "")
+	])
 	NetworkManager.join_server(server_host, server_port)
 
 	# Scene transition happens via NetworkManager.client_connected signal
@@ -321,27 +317,33 @@ func _cleanup_lobby() -> void:
 
 
 func _api_request(endpoint: String, data: Dictionary, method: String = "POST") -> Dictionary:
-	var url := "http://%s:%d%s" % [BACKEND_HOST, BACKEND_PORT, endpoint]
+	# Create fresh HTTPRequest per call to avoid concurrency issues
+	var http := HTTPRequest.new()
+	http.timeout = 10.0
+	add_child(http)
+
+	var url := BackendConfig.get_http_url() + endpoint
 	var headers := ["Content-Type: application/json"]
 	var body := JSON.stringify(data) if not data.is_empty() else ""
-
 	var http_method := HTTPClient.METHOD_POST if method == "POST" else HTTPClient.METHOD_GET
 
-	var error := _http.request(url, headers, http_method, body)
+	var error := http.request(url, headers, http_method, body)
 	if error != OK:
-		return {"error": "Request failed"}
+		http.queue_free()
+		return {"error": "Request failed (%s)" % error_string(error)}
 
-	var result = await _http.request_completed
+	var result = await http.request_completed
+	http.queue_free()
 
 	if result[0] != HTTPRequest.RESULT_SUCCESS:
-		return {"error": "HTTP error"}
+		return {"error": "HTTP error (%d)" % result[0]}
 
 	if result[1] < 200 or result[1] >= 300:
 		return {"error": "HTTP %d" % result[1]}
 
 	var json := JSON.new()
 	if json.parse(result[3].get_string_from_utf8()) != OK:
-		return {"error": "Invalid JSON"}
+		return {"error": "Invalid JSON response"}
 
 	return json.data if json.data is Dictionary else {"data": json.data}
 
@@ -379,3 +381,16 @@ func get_spawn_assignment() -> Dictionary:
 		"group": assigned_spawn_group,
 		"index": assigned_spawn_index
 	}
+
+
+## Called by server (via RPC) when it assigns our spawn
+## Client only stores this for UI display - server is authoritative
+func set_spawn_assignment(group: String, index: int) -> void:
+	assigned_spawn_group = group
+	assigned_spawn_index = index
+	print("[Lobby] Server assigned spawn: group=%s, index=%d" % [group, index])
+
+
+## Get current lobby ID (for sending to server on connect)
+func get_lobby_id() -> String:
+	return current_lobby.get("id", "")
