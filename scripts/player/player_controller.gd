@@ -151,6 +151,10 @@ func _physics_process(delta: float) -> void:
 	# Network controller handles all the tick logic based on authority
 	# Movement and combat are processed there
 
+	# Handle hammer input (local player only)
+	if is_local_player:
+		_process_hammer_input()
+
 	# Update animation from movement state
 	if animation_controller and movement_controller:
 		animation_controller.update_from_movement(
@@ -159,6 +163,26 @@ func _physics_process(delta: float) -> void:
 			is_on_floor(),
 			movement_controller.is_sprinting
 		)
+
+
+## Process hammer input (barricading tool)
+func _process_hammer_input() -> void:
+	# Check if we have a hammer equipped
+	var hammer: Hammer = get_meta("hammer") if has_meta("hammer") else null
+	if not hammer:
+		return
+
+	# Check if we're not holding a prop (prop handler takes priority)
+	if prop_handler and prop_handler.is_holding:
+		return
+
+	# Primary action - place nail or swing
+	if Input.is_action_just_pressed("primary_action"):
+		hammer.primary_action()
+
+	# Secondary action - repair nail
+	if Input.is_action_just_pressed("secondary_action"):
+		hammer.secondary_action()
 
 
 ## Initialize loadout from RaidManager (called when raid starts)

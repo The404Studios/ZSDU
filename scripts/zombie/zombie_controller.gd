@@ -34,7 +34,12 @@ const BASE_DAMAGE := 15.0
 const BASE_ATTACK_RATE := 1.0
 
 # Current stats
-@export var zombie_type: ZombieType = ZombieType.WALKER
+@export var zombie_type: ZombieType = ZombieType.WALKER:
+	set(value):
+		zombie_type = value
+		# Reapply modifiers when type changes
+		if is_inside_tree():
+			_apply_type_modifiers()
 var zombie_id: int = 0
 var health: float = BASE_HEALTH
 var max_health: float = BASE_HEALTH
@@ -474,3 +479,18 @@ func apply_network_state(state: Dictionary) -> void:
 	current_state = state.get("state", current_state) as ZombieState
 	health = state.get("health", health)
 	is_attacking = state.get("attacking", false)
+
+
+## Convert string to ZombieType enum
+static func string_to_type(type_str: String) -> ZombieType:
+	match type_str.to_lower():
+		"walker": return ZombieType.WALKER
+		"runner": return ZombieType.RUNNER
+		"brute": return ZombieType.BRUTE
+		"crawler": return ZombieType.CRAWLER
+	return ZombieType.WALKER
+
+
+## Set type from string (used when spawning)
+func set_type_from_string(type_str: String) -> void:
+	zombie_type = string_to_type(type_str)

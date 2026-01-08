@@ -386,10 +386,13 @@ func spawn_zombie(position: Vector3, zombie_type: String = "walker") -> int:
 	var zombie: Node3D = zombie_scene.instantiate()
 	zombie.name = "Zombie_%d" % zombie_id
 	zombie.set("zombie_id", zombie_id)
-	zombie.set("zombie_type", zombie_type)
 
 	if zombies_container:
 		zombies_container.add_child(zombie)
+
+	# Set zombie type AFTER adding to tree (triggers _apply_type_modifiers via setter)
+	if zombie.has_method("set_type_from_string"):
+		zombie.set_type_from_string(zombie_type)
 
 	zombie.global_position = position
 	zombies[zombie_id] = zombie
@@ -416,10 +419,13 @@ func _spawn_zombie_local(zombie_id: int, position: Vector3, zombie_type: String)
 	var zombie: Node3D = zombie_scene.instantiate()
 	zombie.name = "Zombie_%d" % zombie_id
 	zombie.set("zombie_id", zombie_id)
-	zombie.set("zombie_type", zombie_type)
 
 	if zombies_container:
 		zombies_container.add_child(zombie)
+
+	# Set zombie type AFTER adding to tree
+	if zombie.has_method("set_type_from_string"):
+		zombie.set_type_from_string(zombie_type)
 
 	zombie.global_position = position
 	zombies[zombie_id] = zombie

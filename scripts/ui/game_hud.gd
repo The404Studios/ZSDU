@@ -98,10 +98,16 @@ func _get_player_hammer() -> Hammer:
 	if not local_player:
 		return null
 
-	if local_player.has_method("get") and local_player.get("inventory"):
-		for item in local_player.inventory:
-			if item is Hammer:
-				return item
+	# Hammer is stored as metadata on player
+	if local_player.has_meta("hammer"):
+		return local_player.get_meta("hammer") as Hammer
+
+	# Fallback: check camera pivot children
+	var camera_pivot := local_player.get_camera_pivot()
+	if camera_pivot:
+		for child in camera_pivot.get_children():
+			if child is Hammer:
+				return child
 
 	return null
 

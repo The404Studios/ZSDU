@@ -156,8 +156,8 @@ func _update_preview() -> void:
 				nail_preview.visible = false
 			return
 
-		# Check if prop is being carried
-		if preview_prop.is_carried:
+		# Check if prop is being held by another player
+		if preview_prop.is_held():
 			if nail_preview:
 				nail_preview.visible = false
 			return
