@@ -1,0 +1,44 @@
+# ZSDU Game Manager Dockerfile
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+WORKDIR /src
+
+# Copy project files
+COPY TraversalServer/TraversalServer.csproj TraversalServer/
+COPY GameManager/GameManager.csproj GameManager/
+
+# Restore dependencies
+RUN dotnet restore GameManager/GameManager.csproj
+
+# Copy source code
+COPY . .
+
+# Build
+WORKDIR /src/GameManager
+RUN dotnet publish -c Release -o /app/publish
+
+# Runtime image
+FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
+WORKDIR /app
+
+# Create data directory
+RUN mkdir -p /app/data
+
+# Copy published files
+COPY --from=build /app/publish .
+
+# Expose ports
+EXPOSE 8080 8081 7777
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8080/health || exit 1
+
+# Environment variables (can be overridden)
+ENV HTTP_PORT=8080
+ENV WS_PORT=8081
+ENV TRAVERSAL_PORT=7777
+ENV MIN_SERVERS=1
+ENV MAX_SERVERS=100
+ENV PLAYERS_PER_SERVER=32
+
+ENTRYPOINT ["dotnet", "GameManager.dll"]
