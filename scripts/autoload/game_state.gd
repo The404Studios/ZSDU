@@ -188,6 +188,10 @@ func handle_event(event_type: String, event_data: Dictionary) -> void:
 			_create_nail_local(event_data)
 		"nail_destroyed":
 			_destroy_nail_local(event_data.nail_id)
+		"nails_cleared":
+			nails.clear()
+		"round_reset":
+			_handle_round_reset()
 		"wave_start":
 			current_wave = event_data.wave
 			current_phase = GamePhase.WAVE_ACTIVE
@@ -692,3 +696,290 @@ func _end_wave() -> void:
 	# Start next wave after intermission
 	await get_tree().create_timer(30.0).timeout
 	_start_wave(current_wave + 1)
+
+
+# ============================================
+# FULL SNAPSHOT (JOIN-IN-PROGRESS)
+# ============================================
+
+## Apply full world snapshot from server (client-side, for late joiners)
+func apply_full_snapshot(state: Dictionary) -> void:
+	print("[GameState] Applying full snapshot...")
+
+	# Apply basic state
+	if "wave" in state:
+		current_wave = state.wave
+	if "phase" in state:
+		current_phase = state.phase as GamePhase
+
+	# Reconstruct players
+	if "players" in state:
+		for player_data in state.players:
+			var peer_id: int = player_data.id
+			var position: Vector3 = player_data.get("position", Vector3.ZERO)
+			_spawn_player_local(peer_id, position)
+
+			# Apply additional state
+			if peer_id in players:
+				var player: Node3D = players[peer_id]
+				if player_data.has("health"):
+					player.set("health", player_data.health)
+				if player_data.has("is_dead"):
+					player.set("is_dead", player_data.is_dead)
+
+	# Reconstruct zombies
+	if "zombies" in state:
+		for zombie_data in state.zombies:
+			var zombie_id: int = zombie_data.id
+			var position: Vector3 = zombie_data.position
+			var zombie_type: String = _zombie_type_to_string(zombie_data.get("type", 0))
+
+			_spawn_zombie_local(zombie_id, position, zombie_type)
+
+			# Apply state
+			if zombie_id in zombies:
+				var zombie: Node3D = zombies[zombie_id]
+				zombie.set("health", zombie_data.get("health", 100))
+				zombie.set("current_state", zombie_data.get("state", 0))
+				zombie.rotation.y = zombie_data.get("rotation", 0)
+
+			# Track highest ID for server sync
+			_next_zombie_id = maxi(_next_zombie_id, zombie_id + 1)
+
+	# Reconstruct props (apply state to existing props)
+	if "props" in state:
+		for prop_data in state.props:
+			var prop_id: int = prop_data.id
+			if prop_id in props:
+				var prop: RigidBody3D = props[prop_id] as RigidBody3D
+				if prop:
+					prop.global_position = prop_data.position
+					prop.rotation = prop_data.rotation
+					prop.sleeping = prop_data.get("sleeping", false)
+					prop.linear_velocity = prop_data.get("linear_velocity", Vector3.ZERO)
+					prop.angular_velocity = prop_data.get("angular_velocity", Vector3.ZERO)
+
+	# Reconstruct nails with joints
+	if "nails" in state:
+		for nail_data in state.nails:
+			_reconstruct_nail(nail_data)
+
+	print("[GameState] Full snapshot applied: %d players, %d zombies, %d nails" % [
+		players.size(), zombies.size(), nails.size()
+	])
+
+
+## Reconstruct a nail from snapshot data (client-side)
+func _reconstruct_nail(nail_data: Dictionary) -> void:
+	var nail_id: int = nail_data.id
+
+	# Store nail data
+	var local_nail := {
+		"id": nail_id,
+		"owner_id": nail_data.owner_id,
+		"prop_id": nail_data.prop_id,
+		"surface_id": nail_data.surface_id,
+		"position": nail_data.position,
+		"normal": nail_data.normal,
+		"hp": nail_data.hp,
+		"max_hp": nail_data.max_hp,
+		"repair_count": nail_data.repair_count,
+		"active": true,
+	}
+
+	nails[nail_id] = local_nail
+
+	# Track highest ID
+	_next_nail_id = maxi(_next_nail_id, nail_id + 1)
+
+	# Clients don't create joints - server owns physics
+	# But we store the data for UI/targeting
+
+
+func _zombie_type_to_string(type_int: int) -> String:
+	match type_int:
+		0: return "walker"
+		1: return "runner"
+		2: return "brute"
+		3: return "crawler"
+	return "walker"
+
+
+# ============================================
+# PROP REGISTRY (Server-Authoritative)
+# ============================================
+
+# Original prop positions for round reset
+var _prop_registry: Dictionary = {}  # prop_id -> { scene_path, original_position, original_rotation }
+
+
+## Register a prop with its original state (server-side, called at world init)
+func register_prop_with_state(prop: RigidBody3D, scene_path: String = "") -> int:
+	var prop_id := _next_prop_id
+	_next_prop_id += 1
+
+	prop.set("prop_id", prop_id)
+	props[prop_id] = prop
+
+	# Store original state for reset
+	_prop_registry[prop_id] = {
+		"scene_path": scene_path,
+		"original_position": prop.global_position,
+		"original_rotation": prop.rotation,
+		"original_mass": prop.mass,
+	}
+
+	return prop_id
+
+
+## Get prop's original state
+func get_prop_original_state(prop_id: int) -> Dictionary:
+	return _prop_registry.get(prop_id, {})
+
+
+# ============================================
+# ROUND RESET (Clean World Lifecycle)
+# ============================================
+
+signal round_reset_started
+signal round_reset_completed
+
+
+## Full round reset (server-side only)
+func reset_round() -> void:
+	if not NetworkManager.is_authority():
+		return
+
+	round_reset_started.emit()
+	print("[GameState] Starting round reset...")
+
+	# 1. Destroy all joints (nails)
+	_cleanup_all_nails()
+
+	# 2. Kill all zombies
+	_cleanup_all_zombies()
+
+	# 3. Reset props to original positions
+	_reset_all_props()
+
+	# 4. Respawn all players
+	_respawn_all_players()
+
+	# 5. Reset wave state
+	current_wave = 0
+	wave_zombies_remaining = 0
+	wave_zombies_killed = 0
+	current_phase = GamePhase.LOBBY
+
+	# 6. Reset ID counters (optional, keeps them for debugging)
+	# _next_nail_id = 1
+	# _next_zombie_id = 1
+
+	# Notify clients
+	NetworkManager.broadcast_event.rpc("round_reset", {})
+
+	round_reset_completed.emit()
+	print("[GameState] Round reset complete")
+
+
+## Cleanup all nails with guaranteed joint destruction
+func _cleanup_all_nails() -> void:
+	var nail_ids := nails.keys()
+	for nail_id in nail_ids:
+		var nail: Dictionary = nails[nail_id]
+
+		# Destroy joint first
+		if nail.has("joint_node") and is_instance_valid(nail.joint_node):
+			nail.joint_node.queue_free()
+
+		# Unregister from prop
+		if nail.prop_id in props:
+			var prop = props[nail.prop_id]
+			if prop and prop.has_method("unregister_nail"):
+				prop.unregister_nail(nail_id)
+
+	# Clear nails dictionary
+	nails.clear()
+
+	# Notify clients
+	NetworkManager.broadcast_event.rpc("nails_cleared", {})
+
+
+## Cleanup all zombies
+func _cleanup_all_zombies() -> void:
+	var zombie_ids := zombies.keys()
+	for zombie_id in zombie_ids:
+		var zombie: Node3D = zombies[zombie_id]
+		if is_instance_valid(zombie):
+			zombie.queue_free()
+
+	zombies.clear()
+
+
+## Reset all props to original positions
+func _reset_all_props() -> void:
+	for prop_id in props:
+		var prop: RigidBody3D = props[prop_id] as RigidBody3D
+		if not is_instance_valid(prop):
+			continue
+
+		# Clear attached nails tracking
+		if prop.has_method("get"):
+			var attached: Array = prop.get("attached_nail_ids")
+			if attached:
+				attached.clear()
+
+		# Reset to original state
+		if prop_id in _prop_registry:
+			var original: Dictionary = _prop_registry[prop_id]
+			prop.global_position = original.original_position
+			prop.rotation = original.original_rotation
+			prop.linear_velocity = Vector3.ZERO
+			prop.angular_velocity = Vector3.ZERO
+			prop.sleeping = false
+
+			# Wake up then let physics settle
+			await get_tree().physics_frame
+			prop.sleeping = true
+
+
+## Respawn all players at spawn points
+func _respawn_all_players() -> void:
+	# Get spawn points from world
+	var spawn_points: Array[Vector3] = []
+	if world_node:
+		var spawn_container := world_node.get_node_or_null("SpawnPoints")
+		if spawn_container:
+			for child in spawn_container.get_children():
+				if child is Node3D and child.name.begins_with("PlayerSpawn"):
+					spawn_points.append(child.global_position)
+
+	# Default spawn points
+	if spawn_points.is_empty():
+		spawn_points = [Vector3(0, 1, 0), Vector3(2, 1, 0), Vector3(-2, 1, 0)]
+
+	# Respawn each player
+	var idx := 0
+	for peer_id in players:
+		var player = players[peer_id]
+		if is_instance_valid(player) and player.has_method("respawn"):
+			var spawn_pos := spawn_points[idx % spawn_points.size()]
+			player.respawn(spawn_pos)
+			idx += 1
+
+
+## Handle round_reset event (client-side)
+func _handle_round_reset() -> void:
+	# Clear local state
+	nails.clear()
+
+	# Zombies will be cleaned up by their queue_free
+
+
+# Update handle_event to include new events
+func _handle_additional_events(event_type: String, event_data: Dictionary) -> void:
+	match event_type:
+		"nails_cleared":
+			nails.clear()
+		"round_reset":
+			_handle_round_reset()
