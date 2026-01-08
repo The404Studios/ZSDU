@@ -15,6 +15,9 @@ signal zombie_killed(zombie_id: int)
 signal barricade_damaged(nail_id: int, damage: float)
 signal barricade_destroyed(nail_id: int)
 signal hit_confirmed(peer_id: int, hit_data: Dictionary)
+signal game_over(reason: String, victory: bool)
+signal extraction_available()
+signal player_extracted(peer_id: int)
 
 enum GamePhase {
 	LOBBY,
@@ -29,6 +32,13 @@ var current_phase: GamePhase = GamePhase.LOBBY
 var current_wave: int = 0
 var wave_zombies_remaining: int = 0
 var wave_zombies_killed: int = 0
+
+# Victory/Extraction settings
+const MAX_WAVES := 10  # Survive 10 waves to win
+const EXTRACTION_UNLOCK_WAVE := 5  # Extraction available after wave 5
+var extraction_active := false
+var extracted_players: Array[int] = []  # peer_ids that extracted
+var dead_players: Array[int] = []  # peer_ids that died
 
 # Entity tracking
 var players: Dictionary = {}  # peer_id -> Player node
@@ -55,6 +65,9 @@ var zombie_scene: PackedScene = null
 func _ready() -> void:
 	# Defer scene loading to avoid circular dependencies
 	call_deferred("_load_scenes")
+
+	# Connect player_died to check for game over
+	player_died.connect(_on_player_death_tracked)
 
 
 func _load_scenes() -> void:
@@ -231,6 +244,46 @@ func handle_event(event_type: String, event_data: Dictionary) -> void:
 			_handle_prop_thrown_event(event_data)
 		"hit_confirmed":
 			_handle_hit_confirmed_event(event_data)
+		"game_over":
+			_handle_game_over_event(event_data)
+		"extraction_unlocked":
+			_handle_extraction_unlocked_event(event_data)
+		"player_extracted":
+			_handle_player_extracted_event(event_data)
+
+
+## Handle game over event (client-side)
+func _handle_game_over_event(event_data: Dictionary) -> void:
+	current_phase = GamePhase.GAME_OVER
+	var reason: String = event_data.get("reason", "Game Over")
+	var victory: bool = event_data.get("victory", false)
+
+	print("[GameState] %s: %s" % ["VICTORY" if victory else "GAME OVER", reason])
+
+	game_over.emit(reason, victory)
+	phase_changed.emit(current_phase)
+
+
+## Handle extraction unlocked event (client-side)
+func _handle_extraction_unlocked_event(event_data: Dictionary) -> void:
+	extraction_active = true
+	var wave: int = event_data.get("wave", current_wave)
+
+	print("[GameState] Extraction unlocked at wave %d!" % wave)
+
+	extraction_available.emit()
+
+
+## Handle player extracted event (client-side)
+func _handle_player_extracted_event(event_data: Dictionary) -> void:
+	var peer_id: int = event_data.get("peer_id", -1)
+
+	if peer_id > 0 and peer_id not in extracted_players:
+		extracted_players.append(peer_id)
+
+	print("[GameState] Player %d extracted!" % peer_id)
+
+	player_extracted.emit(peer_id)
 
 
 ## Called when a player disconnects
@@ -1090,9 +1143,174 @@ func _end_wave() -> void:
 	wave_ended.emit(current_wave)
 	phase_changed.emit(current_phase)
 
+	# Check for victory (survived all waves)
+	if current_wave >= MAX_WAVES:
+		_trigger_victory("Survived all waves!")
+		return
+
+	# Check if extraction should unlock
+	if current_wave >= EXTRACTION_UNLOCK_WAVE and not extraction_active:
+		_unlock_extraction()
+
 	# Start next wave after intermission
 	await get_tree().create_timer(30.0).timeout
+
+	# Don't start next wave if game ended
+	if current_phase == GamePhase.GAME_OVER:
+		return
+
 	_start_wave(current_wave + 1)
+
+
+# ============================================
+# GAME OVER / VICTORY SYSTEM
+# ============================================
+
+## Check if all players are dead (server-side)
+func _check_all_players_dead() -> void:
+	if not NetworkManager.is_authority():
+		return
+
+	if current_phase == GamePhase.GAME_OVER:
+		return
+
+	var alive_count := 0
+	for peer_id in players:
+		var player: Node3D = players[peer_id]
+		if is_instance_valid(player):
+			var is_dead: bool = player.get("is_dead") if player.has_method("get") else false
+			if not is_dead:
+				alive_count += 1
+
+	# Also count extracted players as "survived"
+	var total_survived := alive_count + extracted_players.size()
+
+	if total_survived == 0 and players.size() > 0:
+		_trigger_game_over("All players eliminated")
+
+
+## Track player death
+func _on_player_death_tracked(peer_id: int) -> void:
+	if peer_id not in dead_players:
+		dead_players.append(peer_id)
+
+	# Check if all players are now dead
+	_check_all_players_dead()
+
+
+## Trigger game over (defeat)
+func _trigger_game_over(reason: String) -> void:
+	if current_phase == GamePhase.GAME_OVER:
+		return
+
+	current_phase = GamePhase.GAME_OVER
+	phase_changed.emit(current_phase)
+
+	print("[GameState] GAME OVER: %s" % reason)
+
+	# Notify clients
+	NetworkManager.broadcast_event.rpc("game_over", {
+		"reason": reason,
+		"victory": false,
+		"wave": current_wave,
+		"kills": wave_zombies_killed,
+	})
+
+	game_over.emit(reason, false)
+
+	# Report to backend
+	if HeadlessServer and HeadlessServer.is_headless:
+		HeadlessServer.report_match_end("defeat")
+
+
+## Trigger victory
+func _trigger_victory(reason: String) -> void:
+	if current_phase == GamePhase.GAME_OVER:
+		return
+
+	current_phase = GamePhase.GAME_OVER
+	phase_changed.emit(current_phase)
+
+	print("[GameState] VICTORY: %s" % reason)
+
+	# Notify clients
+	NetworkManager.broadcast_event.rpc("game_over", {
+		"reason": reason,
+		"victory": true,
+		"wave": current_wave,
+		"kills": wave_zombies_killed,
+		"extracted": extracted_players.size(),
+	})
+
+	game_over.emit(reason, true)
+
+	# Report to backend
+	if HeadlessServer and HeadlessServer.is_headless:
+		HeadlessServer.report_match_end("victory")
+
+
+## Unlock extraction (after wave threshold)
+func _unlock_extraction() -> void:
+	extraction_active = true
+
+	print("[GameState] Extraction unlocked at wave %d!" % current_wave)
+
+	# Notify clients
+	NetworkManager.broadcast_event.rpc("extraction_unlocked", {
+		"wave": current_wave
+	})
+
+	extraction_available.emit()
+
+
+## Player extracts (server-side)
+func extract_player(peer_id: int) -> void:
+	if not NetworkManager.is_authority():
+		return
+
+	if not extraction_active:
+		return
+
+	if peer_id in extracted_players:
+		return
+
+	extracted_players.append(peer_id)
+
+	print("[GameState] Player %d extracted!" % peer_id)
+
+	# Remove player from world
+	if peer_id in players:
+		var player: Node3D = players[peer_id]
+		if is_instance_valid(player):
+			player.queue_free()
+		players.erase(peer_id)
+
+	# Notify clients
+	NetworkManager.broadcast_event.rpc("player_extracted", {
+		"peer_id": peer_id
+	})
+
+	player_extracted.emit(peer_id)
+
+	# Check if all remaining players extracted
+	if players.is_empty() and extracted_players.size() > 0:
+		_trigger_victory("All players extracted!")
+
+
+## Check if extraction is available
+func is_extraction_available() -> bool:
+	return extraction_active
+
+
+## Get game end stats
+func get_game_stats() -> Dictionary:
+	return {
+		"wave": current_wave,
+		"kills": wave_zombies_killed,
+		"extracted": extracted_players.size(),
+		"dead": dead_players.size(),
+		"victory": current_phase == GamePhase.GAME_OVER and extracted_players.size() > 0,
+	}
 
 
 # ============================================
