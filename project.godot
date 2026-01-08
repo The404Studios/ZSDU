@@ -22,6 +22,8 @@ TraversalClient="*res://scripts/autoload/traversal_client.gd"
 NetworkManager="*res://scripts/autoload/network_manager.gd"
 GameState="*res://scripts/autoload/game_state.gd"
 PhysicsThrottle="*res://scripts/autoload/physics_throttle.gd"
+GameManagerClient="*res://scripts/autoload/game_manager_client.gd"
+HeadlessServer="*res://scripts/autoload/headless_server.gd"
 
 [display]
 

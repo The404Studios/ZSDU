@@ -1,0 +1,177 @@
+---
+# MySQL Secret
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mysql-credentials
+  namespace: zsdu
+type: Opaque
+stringData:
+  username: zsdu_user
+  password: changeme_in_production
+  root-password: changeme_root_password
+
+---
+# MySQL Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mysql
+  namespace: zsdu
+  labels:
+    app: mysql
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      containers:
+        - name: mysql
+          image: mysql:8.0
+          ports:
+            - containerPort: 3306
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-credentials
+                  key: root-password
+            - name: MYSQL_DATABASE
+              value: zsdu
+            - name: MYSQL_USER
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-credentials
+                  key: username
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-credentials
+                  key: password
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "500m"
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/mysql
+            - name: init-scripts
+              mountPath: /docker-entrypoint-initdb.d
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: mysql-data
+        - name: init-scripts
+          configMap:
+            name: mysql-init
+
+---
+# MySQL Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql
+  namespace: zsdu
+spec:
+  type: ClusterIP
+  ports:
+    - port: 3306
+      targetPort: 3306
+  selector:
+    app: mysql
+
+---
+# MySQL PVC
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-data
+  namespace: zsdu
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+
+---
+# MySQL Init Scripts
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mysql-init
+  namespace: zsdu
+data:
+  01-schema.sql: |
+    -- Players table
+    CREATE TABLE IF NOT EXISTS players (
+      id VARCHAR(36) PRIMARY KEY,
+      username VARCHAR(64) NOT NULL,
+      email VARCHAR(255),
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      last_login TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      total_games_played INT DEFAULT 0,
+      total_wins INT DEFAULT 0,
+      total_zombie_kills INT DEFAULT 0,
+      highest_wave INT DEFAULT 0,
+      skill_rating INT DEFAULT 1000,
+      currency INT DEFAULT 0,
+      INDEX idx_username (username),
+      INDEX idx_skill_rating (skill_rating)
+    );
+
+    -- Player inventory table
+    CREATE TABLE IF NOT EXISTS player_inventory (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      player_id VARCHAR(36) NOT NULL,
+      item_id VARCHAR(64) NOT NULL,
+      quantity INT DEFAULT 1,
+      acquired_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (player_id) REFERENCES players(id),
+      UNIQUE KEY idx_player_item (player_id, item_id)
+    );
+
+    -- Game sessions table
+    CREATE TABLE IF NOT EXISTS game_sessions (
+      id VARCHAR(36) PRIMARY KEY,
+      server_id VARCHAR(36) NOT NULL,
+      game_mode VARCHAR(32) DEFAULT 'survival',
+      map_name VARCHAR(64) DEFAULT 'default',
+      started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      ended_at TIMESTAMP NULL,
+      final_wave INT DEFAULT 0,
+      is_active BOOLEAN DEFAULT TRUE,
+      INDEX idx_started_at (started_at),
+      INDEX idx_server_id (server_id)
+    );
+
+    -- Game session players (junction table)
+    CREATE TABLE IF NOT EXISTS game_session_players (
+      session_id VARCHAR(36) NOT NULL,
+      player_id VARCHAR(36) NOT NULL,
+      score INT DEFAULT 0,
+      joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (session_id, player_id),
+      FOREIGN KEY (session_id) REFERENCES game_sessions(id),
+      FOREIGN KEY (player_id) REFERENCES players(id)
+    );
+
+    -- Leaderboard cache table
+    CREATE TABLE IF NOT EXISTS leaderboards (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      stat_type VARCHAR(32) NOT NULL,
+      player_id VARCHAR(36) NOT NULL,
+      score INT NOT NULL,
+      rank_position INT NOT NULL,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY idx_stat_player (stat_type, player_id),
+      INDEX idx_stat_rank (stat_type, rank_position)
+    );

@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: zsdu
+  labels:
+    app.kubernetes.io/name: zsdu
+    app.kubernetes.io/component: game-infrastructure

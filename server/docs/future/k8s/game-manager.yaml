@@ -1,0 +1,149 @@
+---
+# Game Manager Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: game-manager
+  namespace: zsdu
+  labels:
+    app: game-manager
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: game-manager
+  template:
+    metadata:
+      labels:
+        app: game-manager
+    spec:
+      containers:
+        - name: game-manager
+          image: zsdu/game-manager:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: websocket
+              containerPort: 8081
+            - name: traversal
+              containerPort: 7777
+          env:
+            - name: HTTP_PORT
+              value: "8080"
+            - name: WS_PORT
+              value: "8081"
+            - name: TRAVERSAL_PORT
+              value: "7777"
+            - name: MIN_SERVERS
+              value: "2"
+            - name: MAX_SERVERS
+              value: "50"
+            - name: PLAYERS_PER_SERVER
+              value: "32"
+            - name: K8S_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: REDIS_HOST
+              value: "redis.zsdu.svc.cluster.local"
+            - name: MYSQL_HOST
+              value: "mysql.zsdu.svc.cluster.local"
+            - name: MYSQL_DATABASE
+              value: "zsdu"
+            - name: MYSQL_USER
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-credentials
+                  key: username
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-credentials
+                  key: password
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: game-manager-data
+
+---
+# Game Manager Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: game-manager
+  namespace: zsdu
+  labels:
+    app: game-manager
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+    - name: websocket
+      port: 8081
+      targetPort: 8081
+    - name: traversal
+      port: 7777
+      targetPort: 7777
+  selector:
+    app: game-manager
+
+---
+# Persistent Volume Claim for data
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: game-manager-data
+  namespace: zsdu
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+
+---
+# Horizontal Pod Autoscaler (optional)
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: game-manager-hpa
+  namespace: zsdu
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: game-manager
+  minReplicas: 1
+  maxReplicas: 3
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
