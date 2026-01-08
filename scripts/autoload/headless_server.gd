@@ -22,9 +22,13 @@ signal shutting_down(reason: String)
 # CONFIGURATION (from cmdline or environment)
 # ============================================
 var game_port: int = 27015
-var backend_url: String = "http://162.248.94.149:8080"  # Production server
 var session_id: String = ""
 var is_headless: bool = false
+
+# Backend URL - uses BackendConfig as single source of truth
+var backend_url: String:
+	get:
+		return BackendConfig.get_http_url() if BackendConfig else "http://162.248.94.149:8080"
 
 # ============================================
 # STATE
@@ -140,26 +144,20 @@ func _check_headless_mode() -> bool:
 
 
 func _parse_config() -> void:
-	# Parse command line args first (highest priority)
+	# Parse command line args (BackendConfig handles backend host/port)
 	var args := OS.get_cmdline_args()
 	for arg in args:
 		if arg.begins_with("--port="):
 			game_port = int(arg.split("=")[1])
-		elif arg.begins_with("--backend="):
-			backend_url = arg.split("=")[1]
 		elif arg.begins_with("--session_id="):
 			session_id = arg.split("=")[1]
 
-	# Fall back to environment variables
+	# Fall back to environment variables for game port
 	var env_port := OS.get_environment("GAME_PORT")
 	if env_port != "" and game_port == 27015:  # Only use env if cmdline didn't set
 		game_port = int(env_port)
 
-	var env_host := OS.get_environment("BACKEND_HOST")
-	var env_backend_port := OS.get_environment("BACKEND_PORT")
-	if env_host != "" and backend_url == "http://127.0.0.1:8080":
-		var port_str := env_backend_port if env_backend_port != "" else "8080"
-		backend_url = "http://%s:%s" % [env_host, port_str]
+	# Note: Backend host/port is now managed by BackendConfig autoload
 
 
 func _start_game_server() -> void:

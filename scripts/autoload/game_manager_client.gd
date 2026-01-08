@@ -8,20 +8,12 @@ extends Node
 ##
 ## This is the primary matchmaking client for production use.
 ## TraversalClient is for LAN session discovery.
+## Uses BackendConfig for centralized URL configuration.
 
 signal match_found(server_info: Dictionary)
 signal server_list_received(servers: Array)
 signal connection_error(message: String)
 signal status_received(status: Dictionary)
-
-# API Configuration (override via environment)
-# Uses same env vars as HeadlessServer for consistency
-var api_host := "162.248.94.149"  # Production server
-var api_port := 8080
-var use_ssl := false
-
-# HTTP client
-var _http_request: HTTPRequest = null
 
 # Player state (set before matchmaking)
 var player_id := ""
@@ -31,49 +23,30 @@ const HTTP_TIMEOUT := 10.0
 
 
 func _ready() -> void:
-	# Create HTTP request node
-	_http_request = HTTPRequest.new()
-	_http_request.timeout = HTTP_TIMEOUT
-	add_child(_http_request)
-
-	# Load config from environment
-	_load_config()
-
-
-func _load_config() -> void:
-	# Same env vars as HeadlessServer for consistency
-	var env_host := OS.get_environment("BACKEND_HOST")
-	if env_host != "":
-		api_host = env_host
-
-	var env_port := OS.get_environment("BACKEND_PORT")
-	if env_port != "":
-		api_port = int(env_port)
-
-	use_ssl = OS.get_environment("BACKEND_SSL") == "true"
-
-	print("[GameManager] Backend: %s://%s:%d" % ["https" if use_ssl else "http", api_host, api_port])
+	print("[GameManager] Using backend: %s" % BackendConfig.get_http_url())
 
 
 # ============================================
 # HTTP HELPERS
 # ============================================
 
-func _get_api_url(endpoint: String) -> String:
-	var protocol := "https" if use_ssl else "http"
-	return "%s://%s:%d%s" % [protocol, api_host, api_port, endpoint]
-
-
 func _http_request_async(method: HTTPClient.Method, endpoint: String, body: Dictionary = {}) -> Dictionary:
-	var url := _get_api_url(endpoint)
+	# Create fresh HTTPRequest per call to avoid concurrency issues
+	var http := HTTPRequest.new()
+	http.timeout = HTTP_TIMEOUT
+	add_child(http)
+
+	var url := BackendConfig.get_http_url() + endpoint
 	var headers := ["Content-Type: application/json"]
 	var body_str := JSON.stringify(body) if not body.is_empty() else ""
 
-	var error := _http_request.request(url, headers, method, body_str)
+	var error := http.request(url, headers, method, body_str)
 	if error != OK:
+		http.queue_free()
 		return {"error": "Request failed: %s" % error_string(error)}
 
-	var result = await _http_request.request_completed
+	var result = await http.request_completed
+	http.queue_free()
 	# result = [result_code, response_code, headers, body]
 
 	if result[0] != HTTPRequest.RESULT_SUCCESS:

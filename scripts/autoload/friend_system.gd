@@ -16,8 +16,6 @@ signal friend_online(friend_id: String)
 signal friend_offline(friend_id: String)
 
 # Configuration
-const BACKEND_HOST := "162.248.94.149"
-const BACKEND_PORT := 8080
 const STATUS_UPDATE_INTERVAL := 30.0  # Update friend status every 30s
 
 # Player identity
@@ -29,8 +27,7 @@ var friends: Dictionary = {}  # friend_id -> FriendInfo
 var pending_requests: Array[Dictionary] = []  # Incoming friend requests
 var sent_requests: Array[Dictionary] = []     # Outgoing friend requests
 
-# HTTP client
-var _http: HTTPRequest = null
+# Status timer
 var _status_timer: Timer = null
 
 # Invite queue
@@ -65,11 +62,6 @@ func _ready() -> void:
 	# Generate player ID if not set
 	if local_player_id == "":
 		local_player_id = _generate_player_id()
-
-	# Create HTTP client
-	_http = HTTPRequest.new()
-	_http.timeout = 10.0
-	add_child(_http)
 
 	# Create status update timer
 	_status_timer = Timer.new()
@@ -226,7 +218,7 @@ func invite_friend(friend_id: String) -> void:
 
 	var match_info := {
 		"matchId": NetworkManager.get_session_id(),
-		"host": "162.248.94.149",  # TODO: Get actual server IP
+		"host": BackendConfig.get_game_server_host(),
 		"port": NetworkManager.get_current_port() if NetworkManager.has_method("get_current_port") else 27015,
 		"hostName": local_player_name
 	}
@@ -263,7 +255,7 @@ func join_friend_game(friend_id: String) -> void:
 		push_error("[FriendSystem] Failed to get game info: %s" % result.error)
 		return
 
-	var host: String = result.get("serverHost", "162.248.94.149")
+	var host: String = result.get("serverHost", BackendConfig.get_game_server_host())
 	var port: int = result.get("serverPort", 27015)
 
 	NetworkManager.join_server(host, port)
@@ -366,27 +358,33 @@ func _check_pending_requests() -> void:
 # ============================================
 
 func _api_request(endpoint: String, data: Dictionary, method: String = "POST") -> Dictionary:
-	var url := "http://%s:%d%s" % [BACKEND_HOST, BACKEND_PORT, endpoint]
+	# Create fresh HTTPRequest per call to avoid concurrency issues
+	var http := HTTPRequest.new()
+	http.timeout = 10.0
+	add_child(http)
+
+	var url := BackendConfig.get_http_url() + endpoint
 	var headers := ["Content-Type: application/json"]
 	var body := JSON.stringify(data) if not data.is_empty() else ""
-
 	var http_method := HTTPClient.METHOD_POST if method == "POST" else HTTPClient.METHOD_GET
 
-	var error := _http.request(url, headers, http_method, body)
+	var error := http.request(url, headers, http_method, body)
 	if error != OK:
-		return {"error": "Request failed"}
+		http.queue_free()
+		return {"error": "Request failed (%s)" % error_string(error)}
 
-	var result = await _http.request_completed
+	var result = await http.request_completed
+	http.queue_free()
 
 	if result[0] != HTTPRequest.RESULT_SUCCESS:
-		return {"error": "HTTP error"}
+		return {"error": "HTTP error (%d)" % result[0]}
 
 	if result[1] < 200 or result[1] >= 300:
 		return {"error": "HTTP %d" % result[1]}
 
 	var json := JSON.new()
 	if json.parse(result[3].get_string_from_utf8()) != OK:
-		return {"error": "Invalid JSON"}
+		return {"error": "Invalid JSON response"}
 
 	return json.data if json.data is Dictionary else {"data": json.data}
 

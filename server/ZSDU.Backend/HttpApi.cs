@@ -126,6 +126,7 @@ public class HttpApi
                 ("/lobby/ready", "POST") => await HandleLobbyReady(request),
                 ("/lobby/start", "POST") => await HandleLobbyStart(request),
                 ("/lobby/status", "POST") => await HandleLobbyStatus(request),
+                ("/lobby/claim_spawn", "POST") => await HandleLobbyClaimSpawn(request),
                 ("/lobby/list", "GET") => GetLobbyList(),
 
                 _ => null
@@ -612,6 +613,35 @@ public class HttpApi
         return new { lobbies };
     }
 
+    /// <summary>
+    /// POST /lobby/claim_spawn
+    /// Called by game server to get authoritative spawn assignment for a player
+    /// </summary>
+    private async Task<object> HandleLobbyClaimSpawn(HttpListenerRequest request)
+    {
+        var body = await ReadBodyAsync<LobbyClaimSpawnRequest>(request);
+        if (body == null || string.IsNullOrEmpty(body.LobbyId) || string.IsNullOrEmpty(body.PlayerId))
+            return new { error = "Invalid request" };
+
+        var lobby = _lobbyService.GetLobby(body.LobbyId);
+        if (lobby == null)
+            return new { error = "Lobby not found" };
+
+        // Find player in lobby
+        var player = lobby.Players.Find(p => p.Id == body.PlayerId);
+        if (player == null)
+            return new { error = "Player not in lobby" };
+
+        // Return server-authoritative spawn assignment
+        return new
+        {
+            playerId = player.Id,
+            groupName = lobby.Name,  // Use lobby name as group
+            spawnIndex = player.SpawnIndex,
+            lobbyId = lobby.Id
+        };
+    }
+
     // ============================================
     // HELPERS
     // ============================================
@@ -746,4 +776,10 @@ public class LobbyStatusRequest
 {
     public string? PlayerId { get; set; }
     public string? LobbyId { get; set; }
+}
+
+public class LobbyClaimSpawnRequest
+{
+    public string LobbyId { get; set; } = "";
+    public string PlayerId { get; set; } = "";
 }
