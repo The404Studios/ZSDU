@@ -25,10 +25,18 @@ enum ConnectionState {
 }
 
 # Traversal server config (for LAN/session discovery only)
-const TRAVERSAL_HOST := "162.248.94.149"  # Production server
-const TRAVERSAL_PORT := 7777
+# Uses BackendConfig as single source of truth
 const HEARTBEAT_INTERVAL := 5.0      # Session heartbeat (NOT game server heartbeat)
 const TIMEOUT_DURATION := 15.0
+
+# Get traversal host/port from BackendConfig
+var traversal_host: String:
+	get:
+		return BackendConfig.get_traversal_host() if BackendConfig else "162.248.94.149"
+
+var traversal_port: int:
+	get:
+		return BackendConfig.get_traversal_port() if BackendConfig else 7777
 
 # Protocol message types
 enum MessageType {
@@ -218,7 +226,7 @@ func connect_to_traversal() -> Error:
 		disconnect_traversal()
 
 	tcp_client = StreamPeerTCP.new()
-	var error := tcp_client.connect_to_host(TRAVERSAL_HOST, TRAVERSAL_PORT)
+	var error := tcp_client.connect_to_host(traversal_host, traversal_port)
 
 	if error != OK:
 		push_error("[Traversal] Failed to connect: %s" % error_string(error))
@@ -228,7 +236,7 @@ func connect_to_traversal() -> Error:
 	timeout_timer = 0.0
 	set_process(true)
 
-	print("[Traversal] Connecting to %s:%d" % [TRAVERSAL_HOST, TRAVERSAL_PORT])
+	print("[Traversal] Connecting to %s:%d" % [traversal_host, traversal_port])
 	return OK
 
 
