@@ -38,6 +38,11 @@ var ready_retry_count: int = 0
 # Match tracking (for game event reporting)
 var current_match_id: String = ""
 
+# Session/Lobby data (for group spawning)
+var session_data: Dictionary = {}
+# lobby_players: Array of { "player_id": String, "peer_id": int, "group": String, "spawn_index": int }
+var player_spawn_registry: Dictionary = {}  # peer_id -> { "group": String, "index": int }
+
 # Timers
 var _heartbeat_timer: Timer = null
 var _ready_retry_timer: Timer = null
@@ -429,3 +434,67 @@ func is_server_registered() -> bool:
 
 func get_uptime() -> float:
 	return Time.get_ticks_msec() / 1000.0
+
+
+# ============================================
+# SESSION/LOBBY DATA MANAGEMENT
+# ============================================
+
+## Set session data (called when lobby starts the game)
+func set_session_data(data: Dictionary) -> void:
+	session_data = data
+	print("[HeadlessServer] Session data set: %s" % data)
+
+	# Parse lobby players for spawn registry
+	var lobby_players: Array = data.get("lobby_players", [])
+	for player_info in lobby_players:
+		var player_id: String = player_info.get("player_id", "")
+		var group: String = player_info.get("group", "")
+		var spawn_index: int = player_info.get("spawn_index", 0)
+
+		if player_id != "":
+			# Store by player_id, will map to peer_id when they connect
+			player_spawn_registry[player_id] = {
+				"group": group,
+				"index": spawn_index
+			}
+			print("[HeadlessServer] Registered spawn for %s: group=%s, index=%d" % [player_id, group, spawn_index])
+
+
+## Get session data
+func get_session_data() -> Dictionary:
+	return session_data
+
+
+## Register peer_id to player_id mapping (called when player connects and identifies)
+func register_player_peer(player_id: String, peer_id: int) -> void:
+	if player_id in player_spawn_registry:
+		var info: Dictionary = player_spawn_registry[player_id]
+		player_spawn_registry[peer_id] = info
+		print("[HeadlessServer] Mapped peer %d to player %s (group=%s, index=%d)" % [
+			peer_id, player_id, info.get("group", ""), info.get("index", 0)
+		])
+
+
+## Get spawn info for a peer
+func get_player_spawn_info(peer_id: int) -> Dictionary:
+	if peer_id in player_spawn_registry:
+		return player_spawn_registry[peer_id]
+
+	# Check if we have any spawn info stored by player_id that matches
+	for key in player_spawn_registry:
+		if key is int and key == peer_id:
+			return player_spawn_registry[key]
+
+	# Default fallback
+	return {
+		"group": "",
+		"index": peer_id - 1
+	}
+
+
+## Clear all session data (for match end)
+func clear_session_data() -> void:
+	session_data = {}
+	player_spawn_registry = {}
+	print("[HeadlessServer] Session data cleared")

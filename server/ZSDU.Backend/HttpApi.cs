@@ -16,6 +16,7 @@ public class HttpApi
     private readonly ServerOrchestrator _orchestrator;
     private readonly GameService _gameService;
     private readonly FriendService _friendService;
+    private readonly LobbyService _lobbyService;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -30,6 +31,7 @@ public class HttpApi
         _orchestrator = orchestrator;
         _gameService = gameService;
         _friendService = new FriendService();
+        _lobbyService = new LobbyService();
         _listener = new HttpListener();
     }
 
@@ -116,6 +118,15 @@ public class HttpApi
                 ("/friends/requests", "POST") => await HandleFriendRequests(request),
                 ("/friends/invite", "POST") => await HandleFriendInvite(request),
                 ("/friends/list", "POST") => await HandleFriendList(request),
+
+                // Lobby system
+                ("/lobby/create", "POST") => await HandleLobbyCreate(request),
+                ("/lobby/join", "POST") => await HandleLobbyJoin(request),
+                ("/lobby/leave", "POST") => await HandleLobbyLeave(request),
+                ("/lobby/ready", "POST") => await HandleLobbyReady(request),
+                ("/lobby/start", "POST") => await HandleLobbyStart(request),
+                ("/lobby/status", "POST") => await HandleLobbyStatus(request),
+                ("/lobby/list", "GET") => GetLobbyList(),
 
                 _ => null
             };
@@ -460,6 +471,148 @@ public class HttpApi
     }
 
     // ============================================
+    // LOBBY SYSTEM
+    // ============================================
+
+    private async Task<object> HandleLobbyCreate(HttpListenerRequest request)
+    {
+        var body = await ReadBodyAsync<LobbyCreateRequest>(request);
+        if (body == null || string.IsNullOrEmpty(body.PlayerId))
+            return new { error = "Invalid request" };
+
+        var lobby = _lobbyService.CreateLobby(
+            body.PlayerId,
+            body.PlayerName ?? "Player",
+            body.LobbyName ?? "Game Lobby",
+            body.MaxPlayers > 0 ? body.MaxPlayers : 4,
+            body.GameMode ?? "survival"
+        );
+
+        return _lobbyService.ToResponse(lobby);
+    }
+
+    private async Task<object> HandleLobbyJoin(HttpListenerRequest request)
+    {
+        var body = await ReadBodyAsync<LobbyJoinRequest>(request);
+        if (body == null || string.IsNullOrEmpty(body.PlayerId) || string.IsNullOrEmpty(body.LobbyId))
+            return new { error = "Invalid request" };
+
+        var lobby = _lobbyService.JoinLobby(body.PlayerId, body.PlayerName ?? "Player", body.LobbyId);
+        if (lobby == null)
+            return new { error = "Could not join lobby" };
+
+        return _lobbyService.ToResponse(lobby);
+    }
+
+    private async Task<object> HandleLobbyLeave(HttpListenerRequest request)
+    {
+        var body = await ReadBodyAsync<PlayerIdRequest>(request);
+        if (body == null || string.IsNullOrEmpty(body.PlayerId))
+            return new { error = "Invalid request" };
+
+        _lobbyService.LeaveLobby(body.PlayerId);
+        return new { message = "Left lobby" };
+    }
+
+    private async Task<object> HandleLobbyReady(HttpListenerRequest request)
+    {
+        var body = await ReadBodyAsync<LobbyReadyRequest>(request);
+        if (body == null || string.IsNullOrEmpty(body.PlayerId))
+            return new { error = "Invalid request" };
+
+        _lobbyService.SetReady(body.PlayerId, body.Ready);
+
+        var lobby = _lobbyService.GetPlayerLobby(body.PlayerId);
+        if (lobby == null)
+            return new { error = "Not in a lobby" };
+
+        return _lobbyService.ToResponse(lobby);
+    }
+
+    private async Task<object> HandleLobbyStart(HttpListenerRequest request)
+    {
+        var body = await ReadBodyAsync<LobbyStartRequest>(request);
+        if (body == null || string.IsNullOrEmpty(body.PlayerId) || string.IsNullOrEmpty(body.LobbyId))
+            return new { error = "Invalid request" };
+
+        var lobby = _lobbyService.GetLobby(body.LobbyId);
+        if (lobby == null)
+            return new { error = "Lobby not found" };
+
+        // Find available server for this lobby
+        var server = _orchestrator.GetAvailableServer();
+        if (server == null)
+        {
+            server = await _orchestrator.SpawnServerAsync();
+            if (server == null)
+                return new { error = "No servers available", status = "unavailable" };
+
+            // Wait for server to be ready
+            for (int i = 0; i < 30; i++)
+            {
+                await Task.Delay(1000);
+                server = _registry.GetServer(server.Id);
+                if (server?.Status == ServerStatus.Ready)
+                    break;
+            }
+
+            if (server?.Status != ServerStatus.Ready)
+                return new { error = "Server failed to start", status = "error" };
+        }
+
+        // Start the game
+        var success = _lobbyService.StartGame(body.PlayerId, body.LobbyId, "162.248.94.149", server.Port, server.Id);
+        if (!success)
+            return new { error = "Cannot start game" };
+
+        // Create match for this lobby
+        var match = _registry.CreateMatch(server.Id, lobby.GameMode);
+        foreach (var player in lobby.Players)
+        {
+            _registry.AddPlayerToMatch(match.Id, player.Id);
+        }
+
+        lobby = _lobbyService.GetLobby(body.LobbyId);
+        return new
+        {
+            success = true,
+            matchId = match.Id,
+            serverHost = "162.248.94.149",
+            serverPort = server.Port,
+            lobby = _lobbyService.ToResponse(lobby!)
+        };
+    }
+
+    private async Task<object> HandleLobbyStatus(HttpListenerRequest request)
+    {
+        var body = await ReadBodyAsync<LobbyStatusRequest>(request);
+        if (body == null)
+            return new { error = "Invalid request" };
+
+        LobbyService.Lobby? lobby = null;
+
+        if (!string.IsNullOrEmpty(body.LobbyId))
+        {
+            lobby = _lobbyService.GetLobby(body.LobbyId);
+        }
+        else if (!string.IsNullOrEmpty(body.PlayerId))
+        {
+            lobby = _lobbyService.GetPlayerLobby(body.PlayerId);
+        }
+
+        if (lobby == null)
+            return new { error = "Lobby not found" };
+
+        return _lobbyService.ToResponse(lobby);
+    }
+
+    private object GetLobbyList()
+    {
+        var lobbies = _lobbyService.GetPublicLobbies();
+        return new { lobbies };
+    }
+
+    // ============================================
     // HELPERS
     // ============================================
 
@@ -558,4 +711,39 @@ public class FriendInviteRequest
     public string FromPlayerId { get; set; } = "";
     public string ToPlayerId { get; set; } = "";
     public Dictionary<string, object>? ServerInfo { get; set; }
+}
+
+// Lobby system request models
+public class LobbyCreateRequest
+{
+    public string PlayerId { get; set; } = "";
+    public string? PlayerName { get; set; }
+    public string? LobbyName { get; set; }
+    public int MaxPlayers { get; set; } = 4;
+    public string? GameMode { get; set; }
+}
+
+public class LobbyJoinRequest
+{
+    public string PlayerId { get; set; } = "";
+    public string? PlayerName { get; set; }
+    public string LobbyId { get; set; } = "";
+}
+
+public class LobbyReadyRequest
+{
+    public string PlayerId { get; set; } = "";
+    public bool Ready { get; set; }
+}
+
+public class LobbyStartRequest
+{
+    public string PlayerId { get; set; } = "";
+    public string LobbyId { get; set; } = "";
+}
+
+public class LobbyStatusRequest
+{
+    public string? PlayerId { get; set; }
+    public string? LobbyId { get; set; }
 }
