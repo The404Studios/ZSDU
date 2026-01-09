@@ -38,6 +38,8 @@ var _interpolation_speed: float = 15.0
 
 # Visual feedback
 var is_highlighted := false
+var _highlight_material: StandardMaterial3D = null
+var _original_materials: Dictionary = {}  # mesh_path -> material
 
 # Constants
 const HOLD_DISTANCE_MIN := 1.5
@@ -371,8 +373,45 @@ func apply_network_state(state: Dictionary) -> void:
 
 ## Highlight for interaction (client-side visual)
 func set_highlighted(highlighted: bool) -> void:
+	if is_highlighted == highlighted:
+		return
+
 	is_highlighted = highlighted
-	# TODO: Change material/outline
+
+	# Create highlight material if needed
+	if not _highlight_material:
+		_highlight_material = StandardMaterial3D.new()
+		_highlight_material.emission_enabled = true
+		_highlight_material.emission = Color(0.3, 0.6, 1.0)  # Blue glow
+		_highlight_material.emission_energy_multiplier = 0.5
+
+	# Apply or remove highlight from all mesh instances
+	for child in get_children():
+		if child is MeshInstance3D:
+			var mesh_inst := child as MeshInstance3D
+			var path := mesh_inst.get_path()
+
+			if highlighted:
+				# Store original material
+				if path not in _original_materials:
+					_original_materials[path] = mesh_inst.material_override
+
+				# Apply highlight (overlay on existing)
+				if mesh_inst.mesh:
+					var mat := mesh_inst.material_override
+					if mat is StandardMaterial3D:
+						var overlay := mat.duplicate() as StandardMaterial3D
+						overlay.emission_enabled = true
+						overlay.emission = Color(0.3, 0.6, 1.0)
+						overlay.emission_energy_multiplier = 0.5
+						mesh_inst.material_override = overlay
+					elif not mat:
+						mesh_inst.material_override = _highlight_material
+			else:
+				# Restore original material
+				if path in _original_materials:
+					mesh_inst.material_override = _original_materials[path]
+					_original_materials.erase(path)
 
 
 ## Interact (toggle pickup/drop)
