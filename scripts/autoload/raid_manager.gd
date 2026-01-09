@@ -5,7 +5,12 @@ extends Node
 ## - Tracking players' raid IDs when they join
 ## - Commit raid outcomes on extraction, death, or disconnect
 ## - Provisional loot tracking during raid
-## - HMAC signature for server-to-server backend calls
+## - HMAC-SHA256 signed requests to backend (via CryptoUtils)
+##
+## Security:
+## - All backend requests are HMAC-SHA256 signed
+## - Timestamp-based replay protection (5-minute window)
+## - Server ID included for audit trail
 ##
 ## Only active on the server (authority).
 
@@ -20,16 +25,8 @@ var active_raids: Dictionary = {}
 # Match tracking
 var current_match_id: String = ""
 
-# Server secret for signature generation
-var _server_secret: String = ""
-
 
 func _ready() -> void:
-	# Load server secret from environment
-	_server_secret = OS.get_environment("SERVER_SECRET")
-	if _server_secret == "":
-		_server_secret = "zsdu_server_secret_change_in_production"  # Default for dev
-
 	# Connect to network signals
 	if NetworkManager:
 		NetworkManager.player_left.connect(_on_player_disconnected)
@@ -216,46 +213,36 @@ func _commit_raid(peer_id: int, survived: bool) -> void:
 	# Build all outcomes (for batch commit)
 	var outcomes := [outcome]
 
-	# Generate signature
-	var signature := _generate_signature(raid_id, current_match_id, outcomes)
-
-	# Send to backend
-	await _send_commit_request(raid_id, current_match_id, outcomes, signature)
+	# Send signed request to backend
+	await _send_signed_commit_request(raid_id, current_match_id, outcomes)
 
 
-func _generate_signature(raid_id: String, match_id: String, outcomes: Array) -> String:
-	# HMAC-SHA256 signature: raid_id + match_id + outcomes_json
-	var data := raid_id + match_id + JSON.stringify(outcomes)
+func _send_signed_commit_request(raid_id: String, match_id: String, outcomes: Array) -> void:
+	# Create HMAC-signed request using CryptoUtils
+	var signed_request := CryptoUtils.sign_raid_commit(raid_id, match_id, outcomes)
 
-	# Simple hash (in production, use proper HMAC)
-	var ctx := HashingContext.new()
-	ctx.start(HashingContext.HASH_SHA256)
-	ctx.update((_server_secret + data).to_utf8_buffer())
-	var hash := ctx.finish()
-
-	return hash.hex_encode()
-
-
-func _send_commit_request(raid_id: String, match_id: String, outcomes: Array, signature: String) -> void:
 	var http := HTTPRequest.new()
 	http.timeout = 15.0
 	add_child(http)
 
 	var url := BackendConfig.get_http_url() + "/server/raid/commit"
 	var headers := ["Content-Type: application/json"]
-	var payload := {
-		"server_secret": _server_secret,
-		"raid_id": raid_id,
-		"match_id": match_id,
-		"outcomes": outcomes,
-		"signature": signature
-	}
 
-	print("[RaidManager] POST /server/raid/commit (raid=%s, match=%s)" % [
-		raid_id.substr(0, 8), match_id.substr(0, 8)
+	# Signed request format:
+	# {
+	#   "payload": { raid_id, match_id, outcomes },
+	#   "signature": "hmac-sha256-hex",
+	#   "timestamp": unix_timestamp,
+	#   "server_id": "unique-server-id"
+	# }
+
+	print("[RaidManager] POST /server/raid/commit (raid=%s, match=%s, server=%s)" % [
+		raid_id.substr(0, 8),
+		match_id.substr(0, 8),
+		signed_request.server_id.substr(0, 8)
 	])
 
-	var error := http.request(url, headers, HTTPClient.METHOD_POST, JSON.stringify(payload))
+	var error := http.request(url, headers, HTTPClient.METHOD_POST, JSON.stringify(signed_request))
 	if error != OK:
 		push_error("[RaidManager] Commit request failed: %s" % error_string(error))
 		raid_committed.emit(raid_id, false)
@@ -266,7 +253,17 @@ func _send_commit_request(raid_id: String, match_id: String, outcomes: Array, si
 	http.queue_free()
 
 	if result[0] != HTTPRequest.RESULT_SUCCESS:
-		push_error("[RaidManager] Commit HTTP error")
+		push_error("[RaidManager] Commit HTTP error: %d" % result[0])
+		raid_committed.emit(raid_id, false)
+		return
+
+	var response_code: int = result[1]
+	if response_code == 401:
+		push_error("[RaidManager] Commit failed: Invalid signature (401 Unauthorized)")
+		raid_committed.emit(raid_id, false)
+		return
+	elif response_code == 403:
+		push_error("[RaidManager] Commit failed: Timestamp expired (403 Forbidden)")
 		raid_committed.emit(raid_id, false)
 		return
 
