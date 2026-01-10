@@ -112,7 +112,7 @@ public class HttpApi
 
                 // Matchmaking (called by clients)
                 ("/match/find", "POST") => await HandleMatchFind(request),
-                var (p, "GET") when p.StartsWith("/match/") => GetMatch(p["/match/".Length..]),
+                (string p, "GET") when p.StartsWith("/match/") => GetMatch(p["/match/".Length..]),
 
                 // Game events (called by game servers)
                 ("/game/player_joined", "POST") => await HandlePlayerJoined(request),
@@ -166,13 +166,13 @@ public class HttpApi
 
                 // Traders
                 ("/traders", "GET") => await HandleGetTraders(request),
-                var (p, "GET") when p.StartsWith("/trader/catalog") => await HandleGetTraderCatalog(request, p),
+                (string p, "GET") when p.StartsWith("/trader/catalog") => await HandleGetTraderCatalog(request, p),
                 ("/trader/buy", "POST") => await HandleTraderBuy(request),
                 ("/trader/sell", "POST") => await HandleTraderSell(request),
 
                 // Market
                 ("/market/search", "GET") => HandleMarketSearch(request),
-                var (p, "GET") when p.StartsWith("/market/listing/") => HandleGetListing(p["/market/listing/".Length..]),
+                (string p, "GET") when p.StartsWith("/market/listing/") => HandleGetListing(p["/market/listing/".Length..]),
                 ("/market/list", "POST") => await HandleMarketList(request),
                 ("/market/buy", "POST") => await HandleMarketBuy(request),
                 ("/market/cancel", "POST") => await HandleMarketCancel(request),
@@ -732,7 +732,7 @@ public class HttpApi
 
     private async Task<object> HandleLogin(HttpListenerRequest request)
     {
-        var body = await ReadJsonAsync<LoginRequest>(request);
+        var body = await ReadBodyAsync<LoginRequest>(request);
         if (body == null || string.IsNullOrEmpty(body.Username))
             return new { error = "Invalid request" };
 
@@ -758,7 +758,7 @@ public class HttpApi
 
     private async Task<object> HandleCharacterCreate(HttpListenerRequest request)
     {
-        var body = await ReadJsonAsync<CharacterCreateRequest>(request);
+        var body = await ReadBodyAsync<CharacterCreateRequest>(request);
         if (body == null || string.IsNullOrEmpty(body.AccountId) || string.IsNullOrEmpty(body.Name))
             return new { error = "Invalid request" };
 
@@ -781,7 +781,7 @@ public class HttpApi
 
     private async Task<object> HandleStashMove(HttpListenerRequest request)
     {
-        var body = await ReadJsonAsync<StashMoveRequest>(request);
+        var body = await ReadBodyAsync<StashMoveRequest>(request);
         if (body == null)
             return new { error = "Invalid request" };
 
@@ -790,7 +790,7 @@ public class HttpApi
 
     private async Task<object> HandleStashDiscard(HttpListenerRequest request)
     {
-        var body = await ReadJsonAsync<StashDiscardRequest>(request);
+        var body = await ReadBodyAsync<StashDiscardRequest>(request);
         if (body == null)
             return new { error = "Invalid request" };
 
@@ -799,7 +799,7 @@ public class HttpApi
 
     private async Task<object> HandleStashSplit(HttpListenerRequest request)
     {
-        var body = await ReadJsonAsync<StashSplitRequest>(request);
+        var body = await ReadBodyAsync<StashSplitRequest>(request);
         if (body == null)
             return new { error = "Invalid request" };
 
@@ -814,7 +814,7 @@ public class HttpApi
     // Raid endpoints
     private async Task<object> HandleRaidPrepare(HttpListenerRequest request)
     {
-        var body = await ReadJsonAsync<RaidPrepareRequest>(request);
+        var body = await ReadBodyAsync<RaidPrepareRequest>(request);
         if (body == null)
             return new { error = "Invalid request" };
 
@@ -823,7 +823,7 @@ public class HttpApi
 
     private async Task<object> HandleRaidCancel(HttpListenerRequest request)
     {
-        var body = await ReadJsonAsync<RaidCancelRequest>(request);
+        var body = await ReadBodyAsync<RaidCancelRequest>(request);
         if (body == null)
             return new { error = "Invalid request" };
 
@@ -833,7 +833,7 @@ public class HttpApi
     // Server-to-server raid endpoints
     private async Task<object> HandleServerRaidStart(HttpListenerRequest request)
     {
-        var body = await ReadJsonAsync<ServerRaidStartRequest>(request);
+        var body = await ReadBodyAsync<ServerRaidStartRequest>(request);
         if (body == null)
             return new { error = "Invalid request" };
 
@@ -854,7 +854,7 @@ public class HttpApi
 
     private async Task<object> HandleServerRaidCommit(HttpListenerRequest request)
     {
-        var body = await ReadJsonAsync<ServerRaidCommitRequest>(request);
+        var body = await ReadBodyAsync<ServerRaidCommitRequest>(request);
         if (body == null)
             return new { error = "Invalid request" };
 
@@ -884,7 +884,7 @@ public class HttpApi
 
     private async Task<object> HandleTraderBuy(HttpListenerRequest request)
     {
-        var body = await ReadJsonAsync<TraderBuyRequest>(request);
+        var body = await ReadBodyAsync<TraderBuyRequest>(request);
         if (body == null)
             return new { error = "Invalid request" };
 
@@ -893,7 +893,7 @@ public class HttpApi
 
     private async Task<object> HandleTraderSell(HttpListenerRequest request)
     {
-        var body = await ReadJsonAsync<TraderSellRequest>(request);
+        var body = await ReadBodyAsync<TraderSellRequest>(request);
         if (body == null)
             return new { error = "Invalid request" };
 
@@ -920,7 +920,7 @@ public class HttpApi
 
     private async Task<object> HandleMarketList(HttpListenerRequest request)
     {
-        var body = await ReadJsonAsync<MarketListRequest>(request);
+        var body = await ReadBodyAsync<MarketListRequest>(request);
         if (body == null)
             return new { error = "Invalid request" };
 
@@ -929,7 +929,7 @@ public class HttpApi
 
     private async Task<object> HandleMarketBuy(HttpListenerRequest request)
     {
-        var body = await ReadJsonAsync<MarketBuyRequest>(request);
+        var body = await ReadBodyAsync<MarketBuyRequest>(request);
         if (body == null)
             return new { error = "Invalid request" };
 
@@ -938,7 +938,7 @@ public class HttpApi
 
     private async Task<object> HandleMarketCancel(HttpListenerRequest request)
     {
-        var body = await ReadJsonAsync<MarketCancelRequest>(request);
+        var body = await ReadBodyAsync<MarketCancelRequest>(request);
         if (body == null)
             return new { error = "Invalid request" };
 
