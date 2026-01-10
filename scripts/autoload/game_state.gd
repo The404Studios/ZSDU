@@ -86,6 +86,10 @@ func _server_tick() -> void:
 	var snapshot := _build_snapshot()
 	NetworkManager.broadcast_state_update.rpc(snapshot)
 
+	# Process entity AI (turrets)
+	if EntityRegistry:
+		EntityRegistry.process_turrets(get_physics_process_delta_time())
+
 	# Check wave completion
 	if current_phase == GamePhase.WAVE_ACTIVE:
 		if wave_zombies_remaining <= 0 and zombies.is_empty():
@@ -439,8 +443,22 @@ func kill_zombie(zombie_id: int) -> void:
 
 	if zombie_id in zombies:
 		var zombie: Node3D = zombies[zombie_id]
+		var zombie_type := "walker"
+		var zombie_pos := Vector3.ZERO
+
 		if is_instance_valid(zombie):
+			zombie_pos = zombie.global_position
+			if "zombie_type" in zombie:
+				zombie_type = zombie.zombie_type
+			elif zombie.has_method("get_type_string"):
+				zombie_type = zombie.get_type_string()
+
+			# Spawn corpse with loot via EntityRegistry
+			if EntityRegistry:
+				EntityRegistry.spawn_corpse(zombie_pos, zombie_type)
+
 			zombie.queue_free()
+
 		zombies.erase(zombie_id)
 		wave_zombies_killed += 1
 		zombie_killed.emit(zombie_id)
@@ -1516,7 +1534,16 @@ func reset_round() -> void:
 	wave_zombies_killed = 0
 	current_phase = GamePhase.LOBBY
 
-	# 6. Reset ID counters (optional, keeps them for debugging)
+	# 6. Reset extraction state
+	extraction_active = false
+	extracted_players.clear()
+	dead_players.clear()
+
+	# 7. Reset EntityRegistry (corpses, turrets, etc)
+	if EntityRegistry:
+		EntityRegistry.reset_for_new_round()
+
+	# 8. Reset ID counters (optional, keeps them for debugging)
 	# _next_nail_id = 1
 	# _next_zombie_id = 1
 
