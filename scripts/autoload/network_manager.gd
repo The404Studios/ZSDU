@@ -472,19 +472,19 @@ func _serialize_nails() -> Array:
 	var result := []
 	for nail_id in GameState.nails:
 		var nail: Dictionary = GameState.nails[nail_id]
-		if not nail.active:
+		if not nail.get("active", false):
 			continue
 
 		result.append({
 			"id": nail_id,
-			"prop_id": nail.prop_id,
-			"surface_id": nail.surface_id,
-			"position": nail.position,
-			"normal": nail.normal,
-			"hp": nail.hp,
-			"max_hp": nail.max_hp,
-			"repair_count": nail.repair_count,
-			"owner_id": nail.owner_id,
+			"prop_id": nail.get("prop_id", -1),
+			"surface_id": nail.get("surface_id", -1),
+			"position": nail.get("position", Vector3.ZERO),
+			"normal": nail.get("normal", Vector3.UP),
+			"hp": nail.get("hp", 0.0),
+			"max_hp": nail.get("max_hp", 100.0),
+			"repair_count": nail.get("repair_count", 0),
+			"owner_id": nail.get("owner_id", -1),
 		})
 
 	return result

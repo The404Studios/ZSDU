@@ -189,30 +189,30 @@ func request_nail_repair(peer_id: int, nail_id: int) -> Dictionary:
 
 	var nail: Dictionary = GameState.nails[nail_id]
 
-	if not nail.active:
+	if not nail.get("active", false):
 		return result
 
 	# Distance check
 	var player_pos: Vector3 = player.global_position
-	if player_pos.distance_to(nail.position) > MAX_REACH:
+	if player_pos.distance_to(nail.get("position", Vector3.ZERO)) > MAX_REACH:
 		return result
 
 	# Repair count check (JetBoom diminishing returns)
-	if nail.repair_count >= nail.max_repairs:
+	if nail.get("repair_count", 0) >= nail.get("max_repairs", 3):
 		result.reason = "max_repairs"
 		return result
 
 	# Already full HP
-	if nail.hp >= nail.max_hp - 0.1:
+	if nail.get("hp", 0.0) >= nail.get("max_hp", 100.0) - 0.1:
 		result.reason = "full_hp"
 		return result
 
 	# Calculate repair with degradation
-	var repair_mult := 1.0 - (nail.repair_count * REPAIR_DEGRADATION * 0.5)
+	var repair_mult := 1.0 - (nail.get("repair_count", 0) * REPAIR_DEGRADATION * 0.5)
 	var repair_amount := REPAIR_AMOUNT_BASE * repair_mult
 
 	# Reduce max HP (diminishing returns)
-	var new_max_hp := nail.base_max_hp * (1.0 - nail.repair_count * REPAIR_DEGRADATION)
+	var new_max_hp := nail.get("base_max_hp", 100.0) * (1.0 - nail.get("repair_count", 0) * REPAIR_DEGRADATION)
 	nail.max_hp = maxf(new_max_hp, NAIL_HP_MIN * 0.5)  # Floor at 50% of min
 
 	# Apply repair
@@ -232,10 +232,11 @@ func damage_nail(nail_id: int, damage: float, attacker_pos: Vector3 = Vector3.ZE
 		return
 
 	var nail: Dictionary = GameState.nails[nail_id]
-	if not nail.active:
+	if not nail.get("active", false):
 		return
 
-	nail.hp -= damage
+	var current_hp: float = nail.get("hp", 0.0)
+	nail.hp = current_hp - damage
 	nail_damaged.emit(nail_id, damage, nail.hp)
 
 	if nail.hp <= 0:
@@ -284,7 +285,7 @@ func _check_cascade_failure(destroyed_nail: Dictionary) -> void:
 	# Check if prop still has supporting nails
 	var remaining_nails := 0
 	for nail_id in prop.attached_nail_ids:
-		if nail_id in GameState.nails and GameState.nails[nail_id].active:
+		if nail_id in GameState.nails and GameState.nails[nail_id].get("active", false):
 			remaining_nails += 1
 
 	# If no nails left, prop is free
@@ -301,10 +302,10 @@ func _check_supported_props(freed_prop: BarricadeProp) -> void:
 	# Find nails that were using this prop as a surface
 	for nail_id in GameState.nails:
 		var nail: Dictionary = GameState.nails[nail_id]
-		if not nail.active:
+		if not nail.get("active", false):
 			continue
 
-		if nail.surface_id == freed_prop.prop_id:
+		if nail.get("surface_id", -1) == freed_prop.prop_id:
 			# This nail was attached to the freed prop
 			cascade_nail_ids.append(nail_id)
 
@@ -356,7 +357,7 @@ func _count_nails_on_prop(prop_id: int) -> int:
 	var count := 0
 	for nail_id in GameState.nails:
 		var nail: Dictionary = GameState.nails[nail_id]
-		if nail.active and nail.prop_id == prop_id:
+		if nail.get("active", false) and nail.get("prop_id", -1) == prop_id:
 			count += 1
 	return count
 
@@ -365,12 +366,12 @@ func _count_nails_on_prop(prop_id: int) -> int:
 func _has_nearby_nail(position: Vector3, prop_id: int) -> bool:
 	for nail_id in GameState.nails:
 		var nail: Dictionary = GameState.nails[nail_id]
-		if not nail.active:
+		if not nail.get("active", false):
 			continue
-		if nail.prop_id != prop_id:
+		if nail.get("prop_id", -1) != prop_id:
 			continue
 
-		var dist := position.distance_to(nail.position)
+		var dist := position.distance_to(nail.get("position", Vector3.ZERO))
 		if dist < MIN_NAIL_DISTANCE:
 			return true
 

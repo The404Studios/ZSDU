@@ -1,11 +1,11 @@
-class_name NetworkInterpolator
-## NetworkInterpolator - Smooth network state interpolation
+class_name EntityInterpolator
+## EntityInterpolator - Smooth network state interpolation for entities
 ##
 ## Handles interpolation and extrapolation for networked entities.
 ## Uses a jitter buffer to smooth out network variance.
 ##
 ## Usage:
-##   var interp := NetworkInterpolator.new()
+##   var interp := EntityInterpolator.new()
 ##   interp.push_state(tick, position, rotation, velocity)
 ##   var smoothed := interp.get_interpolated_state(current_tick)
 

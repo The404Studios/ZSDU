@@ -180,7 +180,8 @@ func start_game() -> void:
 		return
 
 	# Server info returned
-	var server_host: String = result.get("serverHost", BackendConfig.get_game_server_host())
+	var default_host: String = BackendConfig.get_game_server_host() if BackendConfig else "127.0.0.1"
+	var server_host: String = result.get("serverHost", default_host)
 	var server_port: int = result.get("serverPort", 27015)
 
 	# Start countdown

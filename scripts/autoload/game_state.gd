@@ -515,7 +515,7 @@ func _validate_nail_placement(peer_id: int, data: Dictionary) -> bool:
 	# Count existing nails on this prop
 	var nail_count := 0
 	for nail_id in nails:
-		if nails[nail_id].prop_id == data.prop_id and nails[nail_id].active:
+		if nails[nail_id].get("prop_id", -1) == data.prop_id and nails[nail_id].get("active", false):
 			nail_count += 1
 
 	if nail_count >= 3:  # Max nails per prop (JetBoom rule)
@@ -524,8 +524,8 @@ func _validate_nail_placement(peer_id: int, data: Dictionary) -> bool:
 	# Check for nail stacking (no nails too close together)
 	for nail_id in nails:
 		var nail: Dictionary = nails[nail_id]
-		if nail.active and nail.prop_id == data.prop_id:
-			var dist: float = nail.position.distance_to(data.position)
+		if nail.get("active", false) and nail.get("prop_id", -1) == data.prop_id:
+			var dist: float = nail.get("position", Vector3.ZERO).distance_to(data.position)
 			if dist < 0.3:  # Min distance between nails
 				return false
 
@@ -586,17 +586,21 @@ func _handle_nail_repair(peer_id: int, data: Dictionary) -> void:
 
 	var nail: Dictionary = nails[nail_id]
 
-	if not nail.active:
+	if not nail.get("active", false):
 		return
 
 	# Check repair count
-	if nail.repair_count >= nail.max_repairs:
+	var repair_count: int = nail.get("repair_count", 0)
+	var max_repairs: int = nail.get("max_repairs", 3)
+	if repair_count >= max_repairs:
 		return  # Can't repair anymore (JetBoom diminishing returns)
 
 	# Repair with diminishing returns
-	var repair_amount := 30.0 * (1.0 - nail.repair_count * 0.25)
-	nail.hp = minf(nail.hp + repair_amount, nail.max_hp * (1.0 - nail.repair_count * 0.15))
-	nail.repair_count += 1
+	var repair_amount := 30.0 * (1.0 - repair_count * 0.25)
+	var current_hp: float = nail.get("hp", 0.0)
+	var max_hp: float = nail.get("max_hp", 100.0)
+	nail.hp = minf(current_hp + repair_amount, max_hp * (1.0 - repair_count * 0.15))
+	nail.repair_count = repair_count + 1
 
 
 ## Damage a nail (server-side, called by zombies)
@@ -608,10 +612,11 @@ func damage_nail(nail_id: int, damage: float) -> void:
 		return
 
 	var nail: Dictionary = nails[nail_id]
-	if not nail.active:
+	if not nail.get("active", false):
 		return
 
-	nail.hp -= damage
+	var current_hp: float = nail.get("hp", 0.0)
+	nail.hp = current_hp - damage
 	barricade_damaged.emit(nail_id, damage)
 
 	if nail.hp <= 0:
@@ -630,7 +635,7 @@ func _destroy_nail(nail_id: int) -> void:
 	var prop_id: int = nail.get("prop_id", -1)
 	if prop_id >= 0 and prop_id in props:
 		var prop: BarricadeProp = props[prop_id] as BarricadeProp
-		if prop:
+		if is_instance_valid(prop):
 			prop.unregister_nail(nail_id)
 
 	# Destroy physics joint
@@ -638,7 +643,8 @@ func _destroy_nail(nail_id: int) -> void:
 		nail.joint_node.queue_free()
 
 	# Notify clients
-	NetworkManager.broadcast_event.rpc("nail_destroyed", {"nail_id": nail_id})
+	if NetworkManager:
+		NetworkManager.broadcast_event.rpc("nail_destroyed", {"nail_id": nail_id})
 
 	barricade_destroyed.emit(nail_id)
 
@@ -656,10 +662,10 @@ func get_nearest_nail(position: Vector3, max_distance: float = 3.0) -> int:
 
 	for nail_id in nails:
 		var nail: Dictionary = nails[nail_id]
-		if not nail.active:
+		if not nail.get("active", false):
 			continue
 
-		var dist: float = position.distance_to(nail.position)
+		var dist: float = position.distance_to(nail.get("position", Vector3.ZERO))
 		if dist < nearest_dist:
 			nearest_dist = dist
 			nearest_id = nail_id
@@ -991,7 +997,9 @@ func _handle_shoot(peer_id: int, data: Dictionary) -> void:
 		return
 
 	# Validate player is alive
-	var player_health: float = player.get("health") if player.has_method("get") else 100.0
+	var player_health: float = 100.0
+	if "health" in player:
+		player_health = player.health
 	if player_health <= 0:
 		return  # Dead players can't shoot
 
@@ -1044,7 +1052,9 @@ func _perform_raycast_hit(peer_id: int, origin: Vector3, direction: Vector3, dam
 
 	# Check what we hit
 	if collider.is_in_group("zombies"):
-		var zombie_id: int = collider.get("zombie_id")
+		var zombie_id: int = collider.zombie_id if "zombie_id" in collider else -1
+		if zombie_id < 0:
+			return
 		hit_data["target_type"] = "zombie"
 		hit_data["target_id"] = zombie_id
 
@@ -1061,7 +1071,7 @@ func _perform_raycast_hit(peer_id: int, origin: Vector3, direction: Vector3, dam
 
 	elif collider.is_in_group("players"):
 		# Friendly fire check (disabled by default)
-		var target_peer_id: int = collider.get("peer_id") if collider.has_method("get") else -1
+		var target_peer_id: int = collider.get("peer_id") if "peer_id" in collider else -1
 		if target_peer_id > 0 and target_peer_id != peer_id:
 			hit_data["target_type"] = "player"
 			hit_data["target_id"] = target_peer_id
@@ -1069,7 +1079,7 @@ func _perform_raycast_hit(peer_id: int, origin: Vector3, direction: Vector3, dam
 			# _damage_player(target_peer_id, damage, hit_position)
 
 	elif collider.is_in_group("props"):
-		var prop_id: int = collider.get("prop_id") if collider.has_method("get") else -1
+		var prop_id: int = collider.get("prop_id") if "prop_id" in collider else -1
 		hit_data["target_type"] = "prop"
 		hit_data["target_id"] = prop_id
 		# Props could take damage or apply impulse
@@ -1077,7 +1087,8 @@ func _perform_raycast_hit(peer_id: int, origin: Vector3, direction: Vector3, dam
 			collider.apply_impulse(direction * damage * 0.5, hit_position - collider.global_position)
 
 	# Broadcast hit confirmation for effects
-	NetworkManager.broadcast_event.rpc("hit_confirmed", hit_data)
+	if NetworkManager:
+		NetworkManager.broadcast_event.rpc("hit_confirmed", hit_data)
 	hit_confirmed.emit(peer_id, hit_data)
 
 
@@ -1094,7 +1105,7 @@ func _damage_zombie(zombie_id: int, damage: float, hit_position: Vector3) -> voi
 		zombie.take_damage(damage, hit_position)
 
 	# Check if zombie died
-	var zombie_health: float = zombie.get("health") if zombie.has_method("get") else 0.0
+	var zombie_health: float = zombie.health if "health" in zombie else 0.0
 	if zombie_health <= 0:
 		kill_zombie(zombie_id)
 
@@ -1197,7 +1208,7 @@ func _check_all_players_dead() -> void:
 	for peer_id in players:
 		var player: Node3D = players[peer_id]
 		if is_instance_valid(player):
-			var is_dead: bool = player.get("is_dead") if player.has_method("get") else false
+			var is_dead: bool = player.is_dead if "is_dead" in player else false
 			if not is_dead:
 				alive_count += 1
 
@@ -1386,7 +1397,7 @@ func apply_full_snapshot(state: Dictionary) -> void:
 			var prop_id: int = prop_data.id
 			if prop_id in props:
 				var prop: RigidBody3D = props[prop_id] as RigidBody3D
-				if prop:
+				if is_instance_valid(prop):
 					prop.global_position = prop_data.position
 					prop.rotation = prop_data.rotation
 					prop.sleeping = prop_data.get("sleeping", false)
@@ -1558,8 +1569,8 @@ func _reset_all_props() -> void:
 			continue
 
 		# Clear attached nails tracking
-		if prop.has_method("get"):
-			var attached: Array = prop.get("attached_nail_ids")
+		if "attached_nail_ids" in prop:
+			var attached: Array = prop.attached_nail_ids
 			if attached:
 				attached.clear()
 

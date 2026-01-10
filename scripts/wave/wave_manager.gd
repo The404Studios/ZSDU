@@ -164,7 +164,7 @@ func _spawn_zombie() -> void:
 		# Apply wave scaling
 		if zombie_id in GameState.zombies:
 			var zombie: ZombieController = GameState.zombies[zombie_id]
-			if zombie:
+			if is_instance_valid(zombie):
 				zombie.zombie_type = zombie_type
 				zombie.apply_wave_scaling(current_wave)
 

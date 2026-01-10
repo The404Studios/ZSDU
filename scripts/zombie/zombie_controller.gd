@@ -285,12 +285,12 @@ func _state_attack_nail(delta: float) -> void:
 		return
 
 	var nail: Dictionary = GameState.nails[target_nail_id]
-	if not nail.active:
+	if not nail.get("active", false):
 		target_nail_id = -1
 		_change_state(ZombieState.PATH)
 		return
 
-	var nail_pos: Vector3 = nail.position
+	var nail_pos: Vector3 = nail.get("position", global_position)
 	var dist := global_position.distance_to(nail_pos)
 
 	# Too far, move closer
@@ -380,7 +380,7 @@ func _check_for_blocking_nail() -> int:
 			# Find a nail connected to this prop
 			for nail_id in GameState.nails:
 				var nail: Dictionary = GameState.nails[nail_id]
-				if nail.active and nail.prop_id == prop_id:
+				if nail.get("active", false) and nail.get("prop_id", -1) == prop_id:
 					return nail_id
 
 	# Also check for nearby nails directly
@@ -414,7 +414,7 @@ func _perform_attack_nail() -> void:
 	GameState.damage_nail(target_nail_id, damage)
 
 	# Check if nail broke
-	if target_nail_id not in GameState.nails or not GameState.nails[target_nail_id].active:
+	if target_nail_id not in GameState.nails or not GameState.nails[target_nail_id].get("active", false):
 		target_nail_id = -1
 		# Resume pathing after breaking through
 		_change_state(ZombieState.PATH)
