@@ -991,7 +991,9 @@ func _handle_shoot(peer_id: int, data: Dictionary) -> void:
 		return
 
 	# Validate player is alive
-	var player_health: float = player.get("health") if player.has_method("get") else 100.0
+	var player_health: float = 100.0
+	if "health" in player:
+		player_health = player.health
 	if player_health <= 0:
 		return  # Dead players can't shoot
 
@@ -1061,7 +1063,7 @@ func _perform_raycast_hit(peer_id: int, origin: Vector3, direction: Vector3, dam
 
 	elif collider.is_in_group("players"):
 		# Friendly fire check (disabled by default)
-		var target_peer_id: int = collider.get("peer_id") if collider.has_method("get") else -1
+		var target_peer_id: int = collider.get("peer_id") if "peer_id" in collider else -1
 		if target_peer_id > 0 and target_peer_id != peer_id:
 			hit_data["target_type"] = "player"
 			hit_data["target_id"] = target_peer_id
@@ -1069,7 +1071,7 @@ func _perform_raycast_hit(peer_id: int, origin: Vector3, direction: Vector3, dam
 			# _damage_player(target_peer_id, damage, hit_position)
 
 	elif collider.is_in_group("props"):
-		var prop_id: int = collider.get("prop_id") if collider.has_method("get") else -1
+		var prop_id: int = collider.get("prop_id") if "prop_id" in collider else -1
 		hit_data["target_type"] = "prop"
 		hit_data["target_id"] = prop_id
 		# Props could take damage or apply impulse
@@ -1094,7 +1096,7 @@ func _damage_zombie(zombie_id: int, damage: float, hit_position: Vector3) -> voi
 		zombie.take_damage(damage, hit_position)
 
 	# Check if zombie died
-	var zombie_health: float = zombie.get("health") if zombie.has_method("get") else 0.0
+	var zombie_health: float = zombie.health if "health" in zombie else 0.0
 	if zombie_health <= 0:
 		kill_zombie(zombie_id)
 
@@ -1197,7 +1199,7 @@ func _check_all_players_dead() -> void:
 	for peer_id in players:
 		var player: Node3D = players[peer_id]
 		if is_instance_valid(player):
-			var is_dead: bool = player.get("is_dead") if player.has_method("get") else false
+			var is_dead: bool = player.is_dead if "is_dead" in player else false
 			if not is_dead:
 				alive_count += 1
 
@@ -1558,8 +1560,8 @@ func _reset_all_props() -> void:
 			continue
 
 		# Clear attached nails tracking
-		if prop.has_method("get"):
-			var attached: Array = prop.get("attached_nail_ids")
+		if "attached_nail_ids" in prop:
+			var attached: Array = prop.attached_nail_ids
 			if attached:
 				attached.clear()
 

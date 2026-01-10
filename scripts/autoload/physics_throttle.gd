@@ -119,8 +119,8 @@ func _update_entity_throttle(entity: Node, distance: float, is_zombie: bool) -> 
 		data.tick_rate = VERY_FAR_TICK_RATE
 
 	# Zombies that are targeting get higher priority
-	if is_zombie and entity.has_method("get"):
-		var state = entity.get("current_state")
+	if is_zombie and "current_state" in entity:
+		var state = entity.current_state
 		if state in [1, 2, 3, 4]:  # AGGRO, PATH, ATTACK_PLAYER, ATTACK_NAIL
 			data.importance = 2.0
 			data.tick_rate = maxi(data.tick_rate / 2, 1)
