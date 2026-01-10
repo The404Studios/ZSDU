@@ -254,10 +254,9 @@ public class TraversalServer
 
     private string GetPublicIp()
     {
-        // For local development, return localhost
-        // In production, this should return the actual public IP
-        var publicIp = Environment.GetEnvironmentVariable("PUBLIC_IP");
-        return !string.IsNullOrEmpty(publicIp) ? publicIp : "127.0.0.1";
+        // Use PublicHost from config (single source of truth)
+        // Can be overridden via PUBLIC_HOST environment variable
+        return _config.PublicHost;
     }
 
     private class HostRegistration
