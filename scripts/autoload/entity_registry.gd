@@ -808,10 +808,17 @@ func _type_to_string(type: EntityType) -> String:
 # ============================================
 
 func _on_player_joined(peer_id: int) -> void:
+	if not NetworkManager.is_authority():
+		return
+
 	# Register player as entity
 	if peer_id in GameState.players:
 		var player: Node3D = GameState.players[peer_id]
 		register_entity(player, EntityType.PLAYER, peer_id)
+
+	# Sync existing entity state to late joiner (after a short delay to ensure player is ready)
+	await get_tree().create_timer(0.5).timeout
+	sync_to_client(peer_id)
 
 
 func _on_player_left(peer_id: int) -> void:
@@ -896,3 +903,102 @@ func reset_for_new_round() -> void:
 	# Reset currency
 	team_currency = STARTING_CURRENCY
 	phasing_players.clear()
+
+
+# ============================================
+# LATE JOINER SYNC (Foot-gun #1 fix)
+# ============================================
+
+## Serialize all entities for late joiner sync
+func serialize_all() -> Dictionary:
+	var entity_list := []
+
+	for net_id in entities:
+		if not is_instance_valid(entities[net_id]):
+			continue
+
+		var entity: Node = entities[net_id]
+		var type: EntityType = entity_types.get(net_id, EntityType.PROP)
+
+		var entity_data := {
+			"net_id": net_id,
+			"type": type,
+			"owner": entity_owners.get(net_id, -1),
+			"components": entity_components.get(net_id, {}),
+		}
+
+		# Add transform for 3D entities
+		if entity is Node3D:
+			entity_data["position"] = entity.global_position
+			entity_data["rotation"] = entity.rotation
+
+		entity_list.append(entity_data)
+
+	# Include phasing players state
+	var phasing_list := []
+	for peer_id in phasing_players:
+		phasing_list.append({
+			"peer_id": peer_id,
+			"end_time": phasing_players[peer_id].end_time
+		})
+
+	return {
+		"entities": entity_list,
+		"team_currency": team_currency,
+		"phasing_players": phasing_list,
+		"next_id": _next_id
+	}
+
+
+## Send full entity state to a specific client (server calls this on player join)
+func sync_to_client(peer_id: int) -> void:
+	if not NetworkManager.is_authority():
+		return
+
+	var snapshot := serialize_all()
+	_receive_entity_snapshot.rpc_id(peer_id, snapshot)
+	print("[EntityRegistry] Synced %d entities to peer %d" % [snapshot.entities.size(), peer_id])
+
+
+## Client receives full entity state (late joiner)
+@rpc("authority", "reliable")
+func _receive_entity_snapshot(snapshot: Dictionary) -> void:
+	print("[EntityRegistry] Receiving entity snapshot...")
+
+	# Apply team currency
+	team_currency = snapshot.get("team_currency", STARTING_CURRENCY)
+
+	# Apply next_id to prevent collisions
+	_next_id = maxi(_next_id, snapshot.get("next_id", 1))
+
+	# Rebuild entity tracking (NOT spawning - that's GameState's job)
+	var entity_list: Array = snapshot.get("entities", [])
+	for entity_data in entity_list:
+		var net_id: int = entity_data.get("net_id", -1)
+		var type: EntityType = entity_data.get("type", EntityType.PROP) as EntityType
+		var owner: int = entity_data.get("owner", -1)
+		var components: Dictionary = entity_data.get("components", {})
+
+		# Store tracking info (entity nodes are spawned by GameState.apply_full_snapshot)
+		entity_types[net_id] = type
+		if owner > 0:
+			entity_owners[net_id] = owner
+		entity_components[net_id] = components
+
+	# Apply phasing state (for visual feedback)
+	var phasing_list: Array = snapshot.get("phasing_players", [])
+	for phasing_data in phasing_list:
+		var peer_id: int = phasing_data.get("peer_id", -1)
+		if peer_id > 0:
+			# Store for visual purposes (actual collision is server-side)
+			phasing_players[peer_id] = {
+				"end_time": phasing_data.get("end_time", 0.0),
+				"original_mask": 0  # Not needed client-side
+			}
+
+	print("[EntityRegistry] Applied snapshot: %d entities, %d currency" % [entity_list.size(), team_currency])
+
+
+## Check if a player is currently phasing (for visual feedback)
+func is_player_phasing(peer_id: int) -> bool:
+	return peer_id in phasing_players

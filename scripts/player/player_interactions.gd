@@ -21,8 +21,7 @@ var shop_ui: Control = null
 var loot_ui: Control = null
 
 # State
-var is_phasing: bool = false
-var phase_timer: float = 0.0
+var is_phasing: bool = false  # Visual only - server controls actual collision
 var nearby_entity_id: int = -1
 var nearby_entity_type: String = ""
 
@@ -48,12 +47,9 @@ func _process(delta: float) -> void:
 	if not player or not is_multiplayer_authority():
 		return
 
-	# Update phase timer (visual feedback)
-	if is_phasing:
-		phase_timer -= delta
-		if phase_timer <= 0:
-			is_phasing = false
-			_update_phase_visual(false)
+	# NOTE: Phase state is SERVER-AUTHORITATIVE
+	# We do NOT use a local timer - we wait for phase_ended event from server
+	# This prevents desync where client thinks phase ended but server disagrees
 
 	# Periodic entity detection
 	_detection_timer += delta
@@ -296,18 +292,20 @@ func _on_entity_event(net_id: int, event: String, payload: Dictionary) -> void:
 
 
 # ============================================
-# PHASE VISUAL FEEDBACK
+# PHASE VISUAL FEEDBACK (Server-Authoritative)
 # ============================================
 
-func _start_phase(duration: float) -> void:
+## Called when server confirms phase started
+## Duration is for UI display only - server controls actual end
+func _start_phase(_duration: float) -> void:
 	is_phasing = true
-	phase_timer = duration
 	_update_phase_visual(true)
 
 
+## Called when server broadcasts phase_ended event
+## This is the ONLY way phase ends - no local timer
 func _end_phase() -> void:
 	is_phasing = false
-	phase_timer = 0.0
 	_update_phase_visual(false)
 
 
