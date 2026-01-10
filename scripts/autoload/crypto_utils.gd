@@ -219,7 +219,7 @@ func _create_canonical_string(payload: Dictionary, timestamp: int) -> String:
 ## Create sorted JSON (keys in alphabetical order) - OPTIMIZED with PackedStringArray
 func _sorted_json(data: Variant) -> String:
 	if data is Dictionary:
-		var keys := data.keys()
+		var keys: Array = data.keys()
 		keys.sort()
 		var parts := PackedStringArray()
 		parts.resize(keys.size())
@@ -237,7 +237,7 @@ func _sorted_json(data: Variant) -> String:
 		return "[" + ",".join(parts) + "]"
 	elif data is String:
 		# Escape special characters
-		var escaped := data.replace("\\", "\\\\").replace('"', '\\"')
+		var escaped: String = data.replace("\\", "\\\\").replace('"', '\\"')
 		return '"%s"' % escaped
 	elif data is bool:
 		return "true" if data else "false"

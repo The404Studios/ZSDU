@@ -227,12 +227,12 @@ func _attempt_drop() -> void:
 	_clear_drag_state()
 
 	# Send to backend
-	var success := await EconomyService.move_item(iid, drop_target_x, drop_target_y, dragging_item.rotation)
+	var success := await EconomyService.move_item(iid, drop_target_x, drop_target_y, dragging_item.item_rotation)
 
 	if not success:
 		# Revert on failure
 		if iid in items:
-			var item := items[iid]
+			var item: StashItem = items[iid]
 			_unregister_placement(iid, item.grid_x, item.grid_y, item.get_grid_width(), item.get_grid_height())
 			item.grid_x = old_x
 			item.grid_y = old_y

@@ -110,7 +110,7 @@ func get_interpolated_state() -> Dictionary:
 
 	# Interpolate
 	is_extrapolating = false
-	var t := (render_time - before.time) / (after.time - before.time)
+	var t: float = (render_time - before.time) / (after.time - before.time)
 	t = clampf(t, 0.0, 1.0)
 
 	return {
@@ -127,8 +127,8 @@ func _extrapolate_from_last() -> Dictionary:
 		return {}
 
 	var last_state: Dictionary = state_buffer.back()
-	var local_time := Time.get_ticks_msec() / 1000.0
-	var time_since_last := local_time - last_state.local_time
+	var local_time: float = Time.get_ticks_msec() / 1000.0
+	var time_since_last: float = local_time - last_state.local_time
 
 	# Track extrapolation start
 	if not is_extrapolating:
@@ -143,7 +143,7 @@ func _extrapolate_from_last() -> Dictionary:
 	var extrap_position: Vector3 = last_state.position + velocity * extrap_time
 
 	# Dampen extrapolation over time (become less confident)
-	var dampen := 1.0 - (time_since_last / extrapolation_limit)
+	var dampen: float = 1.0 - (time_since_last / extrapolation_limit)
 	dampen = maxf(dampen, 0.0)
 
 	return {

@@ -337,7 +337,13 @@ func _on_server_disconnected() -> void:
 # ============================================
 
 func is_authority() -> bool:
-	return is_server or multiplayer.is_server()
+	# Check if we're the server, handling case where no peer exists
+	if is_server:
+		return true
+	# Only call multiplayer.is_server() if a peer is assigned
+	if multiplayer.multiplayer_peer != null and multiplayer.multiplayer_peer.get_connection_status() != MultiplayerPeer.CONNECTION_DISCONNECTED:
+		return multiplayer.is_server()
+	return false
 
 
 func get_peer_ids() -> Array[int]:
