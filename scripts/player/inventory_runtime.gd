@@ -69,7 +69,7 @@ func initialize_from_loadout(loadout: Dictionary, p_character_id: String, p_raid
 			continue
 
 		var def_id: String = item_data.get("def_id", item_data.get("defId", ""))
-		var item_def: Dictionary = EconomyService.get_item_def(def_id)
+		var item_def: Dictionary = EconomyService.get_item_def(def_id) if EconomyService else {}
 
 		match slot_name:
 			"primary":

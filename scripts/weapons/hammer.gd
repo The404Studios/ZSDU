@@ -252,10 +252,10 @@ func _request_repair_nail() -> void:
 
 	for nail_id in GameState.nails:
 		var nail: Dictionary = GameState.nails[nail_id]
-		if not nail.active:
+		if not nail.get("active", false):
 			continue
 
-		var nail_pos: Vector3 = nail.position
+		var nail_pos: Vector3 = nail.get("position", Vector3.ZERO)
 		var dist := from.distance_to(nail_pos)
 
 		if dist < nearest_dist:

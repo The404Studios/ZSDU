@@ -59,7 +59,7 @@ func _physics_process(delta: float) -> void:
 			players_in_zone.erase(peer_id)
 			continue
 
-		var is_dead: bool = player.get("is_dead") if player else false
+		var is_dead: bool = player.is_dead if "is_dead" in player else false
 		if is_dead:
 			_cancel_extraction(peer_id, "Player died")
 			continue
