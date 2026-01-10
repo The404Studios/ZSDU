@@ -175,7 +175,7 @@ func _update_slot_display(slot_name: String) -> void:
 
 func _update_ready_button() -> void:
 	# Check if minimum loadout requirements met
-	var has_weapon := loadout.primary != "" or loadout.secondary != "" or loadout.melee != ""
+	var has_weapon: bool = loadout.primary != "" or loadout.secondary != "" or loadout.melee != ""
 	ready_button.disabled = not has_weapon
 
 	if has_weapon:

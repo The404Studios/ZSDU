@@ -103,14 +103,14 @@ static func gather_local(look_yaw: float, look_pitch: float, seq: int = 0) -> Pl
 
 	input.jump = Input.is_action_just_pressed("jump")
 	input.sprint = Input.is_action_pressed("sprint")
-	input.crouch = Input.is_action_just_pressed("crouch") if Input.has_action("crouch") else false
-	input.prone = Input.is_action_just_pressed("prone") if Input.has_action("prone") else false
+	input.crouch = Input.is_action_just_pressed("crouch") if InputMap.has_action("crouch") else false
+	input.prone = Input.is_action_just_pressed("prone") if InputMap.has_action("prone") else false
 
 	input.fire = Input.is_action_pressed("primary_action")
 	input.ads = Input.is_action_pressed("secondary_action")
 	input.reload = Input.is_action_just_pressed("reload")
 	input.interact = Input.is_action_just_pressed("interact")
-	input.drop = Input.is_action_just_pressed("drop") if Input.has_action("drop") else false
+	input.drop = Input.is_action_just_pressed("drop") if InputMap.has_action("drop") else false
 
 	# Weapon slots
 	if Input.is_action_just_pressed("slot_1"):

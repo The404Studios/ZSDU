@@ -19,7 +19,7 @@ var item_data: Dictionary = {}
 var item_def: Dictionary = {}
 var grid_x: int = 0
 var grid_y: int = 0
-var rotation: int = 0  # 0 or 1
+var item_rotation: int = 0  # 0 or 1
 
 # Visual
 var is_dragging := false
@@ -45,7 +45,7 @@ func setup(p_iid: String, p_item_data: Dictionary, p_item_def: Dictionary, p_x: 
 	def_id = p_item_data.get("def_id", p_item_data.get("defId", ""))
 	grid_x = p_x
 	grid_y = p_y
-	rotation = p_rotation
+	item_rotation = p_rotation
 
 	# Check if locked
 	var flags: Dictionary = item_data.get("flags", {})
@@ -56,7 +56,7 @@ func setup(p_iid: String, p_item_data: Dictionary, p_item_def: Dictionary, p_x: 
 	var h: int = item_def.get("h", item_def.get("height", 1))
 
 	# Apply rotation
-	if rotation == 1:
+	if item_rotation == 1:
 		var temp := w
 		w = h
 		h = temp
@@ -179,16 +179,16 @@ func cancel_drag() -> void:
 func get_grid_width() -> int:
 	var w: int = item_def.get("w", item_def.get("width", 1))
 	var h: int = item_def.get("h", item_def.get("height", 1))
-	return h if rotation == 1 else w
+	return h if item_rotation == 1 else w
 
 
 func get_grid_height() -> int:
 	var w: int = item_def.get("w", item_def.get("width", 1))
 	var h: int = item_def.get("h", item_def.get("height", 1))
-	return w if rotation == 1 else h
+	return w if item_rotation == 1 else h
 
 
-func get_tooltip_text() -> String:
+func _get_tooltip_text() -> String:
 	var name_text: String = item_def.get("name", def_id)
 	var desc: String = item_def.get("description", "")
 	var category: String = item_def.get("category", "misc")

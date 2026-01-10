@@ -188,7 +188,7 @@ func _raycast_for_nail_surface() -> Dictionary:
 
 	# If holding a prop, exclude it from raycast
 	if held_prop_id >= 0 and held_prop_id in GameState.props:
-		var held_prop := GameState.props[held_prop_id]
+		var held_prop: Node = GameState.props[held_prop_id]
 		if is_instance_valid(held_prop):
 			query.exclude.append(held_prop)
 

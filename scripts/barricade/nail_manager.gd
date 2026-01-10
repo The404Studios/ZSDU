@@ -208,11 +208,11 @@ func request_nail_repair(peer_id: int, nail_id: int) -> Dictionary:
 		return result
 
 	# Calculate repair with degradation
-	var repair_mult := 1.0 - (nail.get("repair_count", 0) * REPAIR_DEGRADATION * 0.5)
-	var repair_amount := REPAIR_AMOUNT_BASE * repair_mult
+	var repair_mult: float = 1.0 - (nail.get("repair_count", 0) * REPAIR_DEGRADATION * 0.5)
+	var repair_amount: float = REPAIR_AMOUNT_BASE * repair_mult
 
 	# Reduce max HP (diminishing returns)
-	var new_max_hp := nail.get("base_max_hp", 100.0) * (1.0 - nail.get("repair_count", 0) * REPAIR_DEGRADATION)
+	var new_max_hp: float = nail.get("base_max_hp", 100.0) * (1.0 - nail.get("repair_count", 0) * REPAIR_DEGRADATION)
 	nail.max_hp = maxf(new_max_hp, NAIL_HP_MIN * 0.5)  # Floor at 50% of min
 
 	# Apply repair

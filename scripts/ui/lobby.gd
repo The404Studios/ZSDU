@@ -53,7 +53,8 @@ func _update_ui() -> void:
 	lobby_name_label.text = "Lobby: %s" % lobby.get("name", "Unknown")
 
 	# Update invite code
-	invite_code.text = lobby.get("id", "")[0:8].to_upper() if lobby.has("id") else ""
+	var lobby_id: String = lobby.get("id", "")
+	invite_code.text = lobby_id.substr(0, 8).to_upper() if lobby_id != "" else ""
 
 	# Update players list
 	_update_players_list(lobby.get("players", []))

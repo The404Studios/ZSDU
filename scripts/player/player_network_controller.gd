@@ -341,7 +341,7 @@ func _server_validate_fire(weapon_state: Dictionary) -> void:
 	var result := space_state.intersect_ray(query)
 
 	if result:
-		var collider := result.collider
+		var collider: Object = result.collider
 
 		# Damage zombies
 		if collider.is_in_group("zombies"):

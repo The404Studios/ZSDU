@@ -247,7 +247,7 @@ func reset_round() -> void:
 	for peer_id in GameState.players:
 		var player: PlayerController = GameState.players[peer_id] as PlayerController
 		if player:
-			var spawn_idx := (peer_id - 1) % player_spawn_positions.size()
+			var spawn_idx: int = (peer_id - 1) % player_spawn_positions.size()
 			player.respawn(player_spawn_positions[spawn_idx])
 
 	# Notify clients
