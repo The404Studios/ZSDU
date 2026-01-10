@@ -47,6 +47,9 @@ var network_controller: PlayerNetworkController = null
 # Prop handler (for barricade system)
 var prop_handler: PropHandler = null
 
+# Weapon manager (for visual weapons)
+var weapon_manager: WeaponManager = null
+
 
 func _ready() -> void:
 	peer_id = get_multiplayer_authority()
@@ -113,6 +116,15 @@ func _setup_local_player() -> void:
 		add_child(prop_handler)
 		prop_handler.initialize(self)
 
+		# Initialize weapon manager (attached to camera pivot for first-person view)
+		weapon_manager = WeaponManager.new()
+		weapon_manager.name = "WeaponManager"
+		camera_pivot.add_child(weapon_manager)
+		weapon_manager.initialize(self, camera)
+
+		# Equip weapons from inventory runtime
+		_setup_weapons_from_inventory()
+
 		# Register raid if we have one
 		_register_raid_with_server()
 	else:
@@ -124,6 +136,26 @@ func _register_raid_with_server() -> void:
 	# Called by client to send their raid info to server
 	if RaidManager:
 		RaidManager.client_register_raid()
+
+
+## Setup visual weapons from inventory runtime
+func _setup_weapons_from_inventory() -> void:
+	if not weapon_manager or not inventory_runtime:
+		return
+
+	# Connect to loadout ready signal
+	if not inventory_runtime.loadout_ready.is_connected(_on_loadout_ready):
+		inventory_runtime.loadout_ready.connect(_on_loadout_ready)
+
+	# If loadout already loaded, setup now
+	for i in range(3):
+		var weapon := inventory_runtime.get_weapon(i)
+		if weapon:
+			weapon_manager.equip_weapon_from_runtime(i, weapon)
+
+
+func _on_loadout_ready() -> void:
+	_setup_weapons_from_inventory()
 
 
 func _input(event: InputEvent) -> void:
@@ -142,6 +174,16 @@ func _input(event: InputEvent) -> void:
 		# Apply rotation locally for responsive feel
 		rotation.y = look_yaw
 		camera_pivot.rotation.x = look_pitch
+
+	# Weapon slot switching (number keys)
+	if event is InputEventKey and event.pressed:
+		match event.keycode:
+			KEY_1:
+				_switch_weapon_slot(0)
+			KEY_2:
+				_switch_weapon_slot(1)
+			KEY_3:
+				_switch_weapon_slot(2)
 
 
 func _physics_process(delta: float) -> void:
@@ -201,6 +243,33 @@ func initialize_loadout(loadout: Dictionary, p_character_id: String, raid_id: St
 		var weapon := inventory_runtime.get_weapon(0)
 		if weapon:
 			combat_controller.bind_weapon(weapon)
+
+
+## Switch weapon slot
+func _switch_weapon_slot(slot: int) -> void:
+	if weapon_manager:
+		weapon_manager.switch_weapon(slot)
+	if combat_controller and inventory_runtime:
+		var weapon := inventory_runtime.get_weapon(slot)
+		if weapon:
+			combat_controller.bind_weapon(weapon)
+
+
+## Apply recoil from weapon (called after firing)
+func apply_weapon_recoil(recoil: Vector2) -> void:
+	if not is_local_player:
+		return
+
+	# Apply recoil to camera pitch (vertical) and yaw (horizontal)
+	look_pitch -= recoil.y
+	look_yaw += recoil.x
+
+	# Clamp pitch
+	look_pitch = clampf(look_pitch, -PI/2 + 0.1, PI/2 - 0.1)
+
+	# Apply immediately
+	rotation.y = look_yaw
+	camera_pivot.rotation.x = look_pitch
 
 
 ## Get network state for snapshot (called by GameState)
@@ -340,3 +409,7 @@ func get_combat_controller() -> CombatController:
 
 func get_inventory_runtime() -> InventoryRuntime:
 	return inventory_runtime
+
+
+func get_weapon_manager() -> WeaponManager:
+	return weapon_manager
