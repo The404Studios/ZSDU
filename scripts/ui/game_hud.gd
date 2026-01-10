@@ -156,17 +156,17 @@ func _create_game_over_ui() -> void:
 	spacer2.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	vbox.add_child(spacer2)
 
-	# Return button
+	# Center button container
+	var button_container := HBoxContainer.new()
+	button_container.alignment = BoxContainer.ALIGNMENT_CENTER
+	vbox.add_child(button_container)
+
+	# Return button (inside the centered container)
 	return_button = Button.new()
 	return_button.text = "Return to Menu"
 	return_button.custom_minimum_size = Vector2(200, 50)
 	return_button.pressed.connect(_on_return_pressed)
-	vbox.add_child(return_button)
-
-	# Center button
-	var button_container := HBoxContainer.new()
-	button_container.alignment = BoxContainer.ALIGNMENT_CENTER
-	vbox.add_child(button_container)
+	button_container.add_child(return_button)
 
 	# Bottom spacer
 	var spacer3 := Control.new()

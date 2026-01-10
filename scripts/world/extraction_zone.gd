@@ -59,7 +59,7 @@ func _physics_process(delta: float) -> void:
 			players_in_zone.erase(peer_id)
 			continue
 
-		var is_dead: bool = player.get("is_dead") if player.has_method("get") else false
+		var is_dead: bool = player.get("is_dead") if player else false
 		if is_dead:
 			_cancel_extraction(peer_id, "Player died")
 			continue
@@ -127,7 +127,7 @@ func _on_body_entered(body: Node3D) -> void:
 		if not body is PlayerController:
 			return
 
-	var peer_id: int = body.get("peer_id") if body.has_method("get") else -1
+	var peer_id: int = body.get("peer_id") if body else -1
 	if peer_id <= 0:
 		return
 
@@ -155,7 +155,7 @@ func _on_body_exited(body: Node3D) -> void:
 	if not body is CharacterBody3D:
 		return
 
-	var peer_id: int = body.get("peer_id") if body.has_method("get") else -1
+	var peer_id: int = body.get("peer_id") if body else -1
 	if peer_id <= 0:
 		return
 

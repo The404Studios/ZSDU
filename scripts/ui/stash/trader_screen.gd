@@ -241,8 +241,15 @@ func _on_stash_updated(_stash: Dictionary, _items: Array, _wallet: Dictionary) -
 func _on_gold_changed(new_amount: int) -> void:
 	if gold_label:
 		gold_label.text = "%d" % new_amount
-	# Refresh catalog to update buy button states
-	await _load_catalog()
+	# Refresh catalog to update buy button states (use call_deferred to avoid issues with signal handlers)
+	if visible and is_inside_tree():
+		call_deferred("_refresh_catalog_deferred")
+
+
+## Deferred catalog refresh (safe for signal handlers)
+func _refresh_catalog_deferred() -> void:
+	if visible and is_inside_tree():
+		_load_catalog()
 
 
 func _on_operation_failed(error: String) -> void:

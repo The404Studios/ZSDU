@@ -380,7 +380,15 @@ func _has_nearby_nail(position: Vector3, prop_id: int) -> bool:
 ## Calculate distance to prop surface (rough approximation)
 func _distance_to_surface(point: Vector3, prop: RigidBody3D) -> float:
 	# Use AABB as approximation
-	var aabb: AABB = prop.get_node("CollisionShape3D").shape.get_debug_mesh().get_aabb() if prop.has_node("CollisionShape3D") else AABB(Vector3.ZERO, Vector3.ONE)
+	var aabb := AABB(Vector3.ZERO, Vector3.ONE)
+
+	if prop.has_node("CollisionShape3D"):
+		var collision_shape = prop.get_node("CollisionShape3D")
+		if collision_shape and collision_shape.shape:
+			var debug_mesh = collision_shape.shape.get_debug_mesh()
+			if debug_mesh:
+				aabb = debug_mesh.get_aabb()
+
 	aabb.position += prop.global_position
 
 	var closest := aabb.position + aabb.size * 0.5

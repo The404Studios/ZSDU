@@ -309,7 +309,9 @@ func _on_ready_button_pressed() -> void:
 	status_label.text = "Preparing raid..."
 
 	# Get current lobby ID (if in lobby)
-	var lobby_id: String = LobbySystem.current_lobby_id if LobbySystem.current_lobby_id else "solo_" + str(randi())
+	var lobby_id: String = "solo_" + str(randi())
+	if LobbySystem and LobbySystem.current_lobby_id and LobbySystem.current_lobby_id != "":
+		lobby_id = LobbySystem.current_lobby_id
 
 	EconomyService.prepare_raid(lobby_id, loadout_dict)
 

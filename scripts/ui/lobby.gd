@@ -94,15 +94,22 @@ func _create_player_entry(player: Dictionary) -> Control:
 	var entry := HBoxContainer.new()
 	entry.custom_minimum_size.y = PLAYER_ENTRY_HEIGHT
 
+	# Cache lobby data to avoid multiple calls
+	var current_lobby := LobbySystem.get_current_lobby() if LobbySystem else {}
+	var leader_id: String = current_lobby.get("leaderId", "")
+	var player_id: String = player.get("id", "")
+	var is_leader := player_id != "" and player_id == leader_id
+	var is_ready: bool = player.get("ready", false)
+
 	# Leader crown or ready indicator
 	var status_label := Label.new()
-	if player.get("id") == LobbySystem.get_current_lobby().get("leaderId"):
+	if is_leader:
 		status_label.text = "[HOST] "
-	elif player.get("ready", false):
+	elif is_ready:
 		status_label.text = "[READY] "
 	else:
 		status_label.text = "[...] "
-	status_label.add_theme_color_override("font_color", Color.GOLD if player.get("id") == LobbySystem.get_current_lobby().get("leaderId") else (Color.GREEN if player.get("ready") else Color.GRAY))
+	status_label.add_theme_color_override("font_color", Color.GOLD if is_leader else (Color.GREEN if is_ready else Color.GRAY))
 	entry.add_child(status_label)
 
 	# Player name

@@ -348,8 +348,8 @@ func apply_network_state(state: Dictionary) -> void:
 		PropMode.FREE, PropMode.NAILED:
 			# Interpolate physics state
 			freeze = false
-			var target_pos: Vector3 = state.pos
-			var target_rot: Vector3 = state.rot
+			var target_pos: Vector3 = state.get("pos", global_position)
+			var target_rot: Vector3 = state.get("rot", rotation)
 
 			if state.get("sleeping", false):
 				global_position = target_pos
@@ -361,8 +361,8 @@ func apply_network_state(state: Dictionary) -> void:
 		PropMode.HELD:
 			# Prop is frozen, use target for interpolation
 			freeze = true
-			_target_position = state.pos
-			_target_rotation = state.rot
+			_target_position = state.get("pos", global_position)
+			_target_rotation = state.get("rot", rotation)
 			hold_offset = state.get("hold_offset", hold_offset)
 			hold_rotation = state.get("hold_rot", hold_rotation)
 

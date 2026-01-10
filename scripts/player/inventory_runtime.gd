@@ -64,8 +64,8 @@ func initialize_from_loadout(loadout: Dictionary, p_character_id: String, p_raid
 	# Load weapons from loadout
 	for slot_name in loadout:
 		var iid: String = loadout[slot_name]
-		var item_data: Dictionary = EconomyService.get_item(iid)
-		if item_data.is_empty():
+		var item_data = EconomyService.get_item(iid) if EconomyService else null
+		if not item_data or item_data.is_empty():
 			continue
 
 		var def_id: String = item_data.get("def_id", item_data.get("defId", ""))
@@ -217,10 +217,12 @@ func pickup_loot(def_id: String, stack: int = 1, durability: float = 1.0, mods: 
 	loot_picked_up.emit(def_id, stack)
 
 	# Report to RaidManager
-	if RaidManager and NetworkManager.is_authority():
-		var peer_id := get_parent().get("peer_id")
-		if peer_id:
-			RaidManager.add_provisional_loot(peer_id, def_id, stack, durability, mods)
+	if RaidManager and NetworkManager and NetworkManager.is_authority():
+		var parent = get_parent()
+		if parent:
+			var peer_id = parent.get("peer_id")
+			if peer_id:
+				RaidManager.add_provisional_loot(peer_id, def_id, stack, durability, mods)
 
 	return true
 
