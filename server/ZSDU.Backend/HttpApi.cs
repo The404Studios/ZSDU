@@ -112,7 +112,7 @@ public class HttpApi
 
                 // Matchmaking (called by clients)
                 ("/match/find", "POST") => await HandleMatchFind(request),
-                var (p, "GET") when p.StartsWith("/match/") => GetMatch(p["/match/".Length..]),
+                (string p, "GET") when p.StartsWith("/match/") => GetMatch(p["/match/".Length..]),
 
                 // Game events (called by game servers)
                 ("/game/player_joined", "POST") => await HandlePlayerJoined(request),
@@ -166,13 +166,13 @@ public class HttpApi
 
                 // Traders
                 ("/traders", "GET") => await HandleGetTraders(request),
-                var (p, "GET") when p.StartsWith("/trader/catalog") => await HandleGetTraderCatalog(request, p),
+                (string p, "GET") when p.StartsWith("/trader/catalog") => await HandleGetTraderCatalog(request, p),
                 ("/trader/buy", "POST") => await HandleTraderBuy(request),
                 ("/trader/sell", "POST") => await HandleTraderSell(request),
 
                 // Market
                 ("/market/search", "GET") => HandleMarketSearch(request),
-                var (p, "GET") when p.StartsWith("/market/listing/") => HandleGetListing(p["/market/listing/".Length..]),
+                (string p, "GET") when p.StartsWith("/market/listing/") => HandleGetListing(p["/market/listing/".Length..]),
                 ("/market/list", "POST") => await HandleMarketList(request),
                 ("/market/buy", "POST") => await HandleMarketBuy(request),
                 ("/market/cancel", "POST") => await HandleMarketCancel(request),
