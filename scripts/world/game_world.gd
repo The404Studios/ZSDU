@@ -205,7 +205,7 @@ func _get_player_spawn_info(peer_id: int) -> Dictionary:
 
 
 func _equip_player(player: PlayerController) -> void:
-	# Give hammer
+	# Give hammer (barricading tool, not a combat WeaponRuntime)
 	var hammer_scene := load("res://scenes/weapons/hammer.tscn")
 	if hammer_scene:
 		var hammer: Hammer = hammer_scene.instantiate()
@@ -216,8 +216,8 @@ func _equip_player(player: PlayerController) -> void:
 			camera_pivot.add_child(hammer)
 			hammer.position = Vector3(0.3, -0.2, -0.5)  # Offset for first person view
 
-		player.inventory.append(hammer)
-		player.current_weapon_slot = 0
+		# Store hammer reference on player for access via get_meta
+		player.set_meta("hammer", hammer)
 
 
 ## Fast round reset (for testing or game restart)

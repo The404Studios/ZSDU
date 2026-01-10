@@ -217,9 +217,9 @@ func invite_friend(friend_id: String) -> void:
 		return
 
 	var match_info := {
-		"matchId": NetworkManager.get_session_id(),
-		"host": BackendConfig.get_game_server_host(),
-		"port": NetworkManager.get_current_port() if NetworkManager.has_method("get_current_port") else 27015,
+		"matchId": NetworkManager.get_session_id() if NetworkManager else "",
+		"host": BackendConfig.get_game_server_host() if BackendConfig else "127.0.0.1",
+		"port": 27015,  # Default game server port
 		"hostName": local_player_name
 	}
 

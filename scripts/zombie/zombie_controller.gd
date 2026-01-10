@@ -34,7 +34,12 @@ const BASE_DAMAGE := 15.0
 const BASE_ATTACK_RATE := 1.0
 
 # Current stats
-@export var zombie_type: ZombieType = ZombieType.WALKER
+@export var zombie_type: ZombieType = ZombieType.WALKER:
+	set(value):
+		zombie_type = value
+		# Reapply modifiers when type changes
+		if is_inside_tree():
+			_apply_type_modifiers()
 var zombie_id: int = 0
 var health: float = BASE_HEALTH
 var max_health: float = BASE_HEALTH
@@ -274,7 +279,7 @@ func _state_attack_player(delta: float) -> void:
 ## ATTACK_NAIL - Attack barricade nail (JetBoom core mechanic)
 func _state_attack_nail(delta: float) -> void:
 	# Verify nail still exists and is active
-	if target_nail_id < 0 or target_nail_id not in GameState.nails:
+	if target_nail_id < 0 or not GameState or not GameState.nails or target_nail_id not in GameState.nails:
 		target_nail_id = -1
 		_change_state(ZombieState.PATH)
 		return
@@ -336,6 +341,9 @@ func _find_target() -> void:
 	target_player = null
 	var nearest_dist := 50.0  # Max aggro range
 
+	if not GameState or not GameState.players:
+		return
+
 	for peer_id in GameState.players:
 		var player: Node3D = GameState.players[peer_id]
 		if not is_instance_valid(player):
@@ -366,9 +374,9 @@ func _check_for_blocking_nail() -> int:
 	if result:
 		# Found a prop, check if it has nails
 		var prop: Node = result.collider
-		var prop_id: int = prop.get("prop_id") if prop.has_method("get") else -1
+		var prop_id: int = prop.get("prop_id") if prop else -1
 
-		if prop_id >= 0:
+		if prop_id >= 0 and GameState and GameState.nails:
 			# Find a nail connected to this prop
 			for nail_id in GameState.nails:
 				var nail: Dictionary = GameState.nails[nail_id]
@@ -474,3 +482,18 @@ func apply_network_state(state: Dictionary) -> void:
 	current_state = state.get("state", current_state) as ZombieState
 	health = state.get("health", health)
 	is_attacking = state.get("attacking", false)
+
+
+## Convert string to ZombieType enum
+static func string_to_type(type_str: String) -> ZombieType:
+	match type_str.to_lower():
+		"walker": return ZombieType.WALKER
+		"runner": return ZombieType.RUNNER
+		"brute": return ZombieType.BRUTE
+		"crawler": return ZombieType.CRAWLER
+	return ZombieType.WALKER
+
+
+## Set type from string (used when spawning)
+func set_type_from_string(type_str: String) -> void:
+	zombie_type = string_to_type(type_str)
