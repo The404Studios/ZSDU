@@ -176,16 +176,6 @@ func request_interact(net_id: int, action: String, payload: Dictionary = {}) -> 
 
 	var sender_id := multiplayer.get_remote_sender_id()
 
-	# Validate entity exists
-	if net_id not in entities:
-		_send_interact_result.rpc_id(sender_id, net_id, action, false, {"error": "Entity not found"})
-		return
-
-	var entity: Node = entities[net_id]
-	if not is_instance_valid(entity):
-		_send_interact_result.rpc_id(sender_id, net_id, action, false, {"error": "Entity invalid"})
-		return
-
 	# Validate player exists
 	if sender_id not in GameState.players:
 		_send_interact_result.rpc_id(sender_id, net_id, action, false, {"error": "Player not found"})
@@ -196,8 +186,24 @@ func request_interact(net_id: int, action: String, payload: Dictionary = {}) -> 
 		_send_interact_result.rpc_id(sender_id, net_id, action, false, {"error": "Player invalid"})
 		return
 
-	# Check distance (unless it's a self-action or placement)
-	if action != "place_turret" and entity != player:
+	# Some actions use different ID types:
+	# - "phase_toggle": net_id is prop_id from GameState.props
+	# - "place_turret": net_id is ignored (position in payload)
+	# - Others: net_id is EntityRegistry net_id
+	var skip_entity_validation := action in ["phase_toggle", "place_turret"]
+
+	if not skip_entity_validation:
+		# Validate entity exists in EntityRegistry
+		if net_id not in entities:
+			_send_interact_result.rpc_id(sender_id, net_id, action, false, {"error": "Entity not found"})
+			return
+
+		var entity: Node = entities[net_id]
+		if not is_instance_valid(entity):
+			_send_interact_result.rpc_id(sender_id, net_id, action, false, {"error": "Entity invalid"})
+			return
+
+		# Check distance
 		var entity_pos: Vector3 = entity.global_position if entity is Node3D else Vector3.ZERO
 		var distance := player.global_position.distance_to(entity_pos)
 		if distance > INTERACT_DISTANCE:
@@ -255,19 +261,30 @@ func _handle_action(peer_id: int, net_id: int, action: String, payload: Dictiona
 # ============================================
 
 ## Phase through nailed props (JetBoom-style)
-func _action_phase_toggle(peer_id: int, target_net_id: int) -> Dictionary:
-	# Check if target is a nailed prop
-	var target_type := get_entity_type(target_net_id)
-	if target_type != EntityType.PROP:
-		return {"success": false, "data": {"error": "Can only phase through props"}}
+## NOTE: Props use prop_id from GameState, not net_id from EntityRegistry
+func _action_phase_toggle(peer_id: int, prop_id: int) -> Dictionary:
+	# Look up prop in GameState (props aren't registered in EntityRegistry)
+	if prop_id not in GameState.props:
+		return {"success": false, "data": {"error": "Prop not found"}}
+
+	var prop: Node = GameState.props[prop_id]
+	if not is_instance_valid(prop):
+		return {"success": false, "data": {"error": "Prop invalid"}}
+
+	# Check distance
+	if peer_id in GameState.players:
+		var player: Node3D = GameState.players[peer_id]
+		if is_instance_valid(player) and prop is Node3D:
+			var distance := player.global_position.distance_to(prop.global_position)
+			if distance > INTERACT_DISTANCE:
+				return {"success": false, "data": {"error": "Too far"}}
 
 	# Check prop has nails
-	var entity: Node = entities[target_net_id]
 	var has_nails := false
-	if entity.has_method("has_nails"):
-		has_nails = entity.has_nails()
-	elif "attached_nail_ids" in entity:
-		has_nails = entity.attached_nail_ids.size() > 0
+	if prop.has_method("has_nails"):
+		has_nails = prop.has_nails()
+	elif "attached_nail_ids" in prop:
+		has_nails = prop.attached_nail_ids.size() > 0
 
 	if not has_nails:
 		return {"success": false, "data": {"error": "Prop must be nailed"}}
