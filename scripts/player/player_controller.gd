@@ -147,7 +147,17 @@ func _setup_weapons_from_inventory() -> void:
 	if not inventory_runtime.loadout_ready.is_connected(_on_loadout_ready):
 		inventory_runtime.loadout_ready.connect(_on_loadout_ready)
 
-	# If loadout already loaded, setup now
+	# If no loadout exists, set up default weapons for testing/development
+	if inventory_runtime.get_weapon(0) == null:
+		inventory_runtime.setup_default_loadout()
+
+		# Bind primary weapon to combat controller
+		if combat_controller:
+			var weapon := inventory_runtime.get_weapon(0)
+			if weapon:
+				combat_controller.bind_weapon(weapon)
+
+	# Setup visual weapons
 	for i in range(3):
 		var weapon := inventory_runtime.get_weapon(i)
 		if weapon:

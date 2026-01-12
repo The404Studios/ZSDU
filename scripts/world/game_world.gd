@@ -205,6 +205,20 @@ func _get_player_spawn_info(peer_id: int) -> Dictionary:
 
 
 func _equip_player(player: PlayerController) -> void:
+	# Give default weapons if no loadout exists
+	var inventory := player.get_inventory_runtime()
+	if inventory and inventory.get_weapon(0) == null:
+		inventory.setup_default_loadout()
+		print("[GameWorld] Gave default loadout to player %d" % player.peer_id)
+
+		# Bind primary weapon to combat controller
+		var combat := player.get_combat_controller()
+		if combat:
+			var weapon := inventory.get_weapon(0)
+			if weapon:
+				combat.bind_weapon(weapon)
+				print("[GameWorld] Bound weapon '%s' to player %d" % [weapon.name, player.peer_id])
+
 	# Give hammer (barricading tool, not a combat WeaponRuntime)
 	var hammer_scene := load("res://scenes/weapons/hammer.tscn")
 	if hammer_scene:
