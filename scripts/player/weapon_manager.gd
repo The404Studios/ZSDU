@@ -460,41 +460,12 @@ func _on_ads_changed(is_ads: bool) -> void:
 		current_weapon.set_ads(is_ads)
 
 
-## Handle weapon fired
+## Handle weapon fired (visual feedback only)
+## NOTE: Network sending is handled by PlayerNetworkController._on_fire_requested
+## We only handle visual/audio effects here to avoid duplicate server requests
 func _on_weapon_fired(hit_info: Dictionary) -> void:
 	weapon_fired.emit(hit_info)
-
-	# Send hit info to server for damage processing
-	if owner_player and owner_player.is_local_player:
-		var action_data := {
-			"origin": hit_info.origin,
-			"damage": hit_info.damage,
-			"hits": [],
-		}
-
-		# Convert hits to serializable format
-		for hit in hit_info.hits:
-			var hit_data := {
-				"position": hit.position,
-				"normal": hit.normal,
-				"distance": hit.distance,
-			}
-
-			var collider: Node = hit.collider
-			if collider:
-				if collider.is_in_group("zombies"):
-					hit_data["target_type"] = "zombie"
-					hit_data["target_id"] = collider.get("zombie_id")
-				elif collider.is_in_group("players"):
-					hit_data["target_type"] = "player"
-					hit_data["target_id"] = collider.get("peer_id")
-				else:
-					hit_data["target_type"] = "world"
-
-			action_data.hits.append(hit_data)
-
-		# Send to server
-		NetworkManager.request_action.rpc_id(1, "shoot", action_data)
+	# Visual effects only - network handled elsewhere
 
 
 ## Get current weapon info for HUD
