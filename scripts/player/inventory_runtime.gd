@@ -271,3 +271,69 @@ func cleanup() -> void:
 	ammo.clear()
 	magazines.clear()
 	provisional_loot.clear()
+
+
+## Setup default loadout for testing/development
+## Called when no RaidManager/EconomyService loadout is available
+func setup_default_loadout() -> void:
+	# Clear existing
+	weapons = [null, null, null]
+	ammo.clear()
+
+	# Create default assault rifle
+	var rifle := WeaponRuntime.new()
+	rifle.def_id = "default_rifle"
+	rifle.name = "Assault Rifle"
+	rifle.damage = 25.0
+	rifle.fire_rate = 0.1
+	rifle.magazine_size = 30
+	rifle.reload_time = 2.5
+	rifle.base_spread = 0.02
+	rifle.ads_spread_mult = 0.3
+	rifle.ammo_type = "5.56"
+	rifle.weapon_type = "rifle"
+	rifle.current_ammo = 30
+	rifle.chambered = true
+	rifle.durability = 1.0
+	weapons[0] = rifle
+
+	# Create default pistol
+	var pistol := WeaponRuntime.new()
+	pistol.def_id = "default_pistol"
+	pistol.name = "Pistol"
+	pistol.damage = 20.0
+	pistol.fire_rate = 0.15
+	pistol.magazine_size = 15
+	pistol.reload_time = 1.5
+	pistol.base_spread = 0.03
+	pistol.ads_spread_mult = 0.4
+	pistol.ammo_type = "9mm"
+	pistol.weapon_type = "pistol"
+	pistol.current_ammo = 15
+	pistol.chambered = true
+	pistol.durability = 1.0
+	weapons[1] = pistol
+
+	# Create default melee knife
+	var knife := WeaponRuntime.new()
+	knife.def_id = "default_knife"
+	knife.name = "Combat Knife"
+	knife.damage = 35.0
+	knife.fire_rate = 0.5
+	knife.magazine_size = 0
+	knife.reload_time = 0.0
+	knife.base_spread = 0.0
+	knife.ammo_type = ""
+	knife.weapon_type = "melee"
+	knife.current_ammo = 0
+	knife.chambered = true
+	knife.durability = 1.0
+	weapons[2] = knife
+
+	# Give starting ammo
+	ammo["5.56"] = 120
+	ammo["9mm"] = 60
+
+	current_weapon_slot = 0
+	loadout_ready.emit()
+	print("[InventoryRuntime] Default loadout initialized")

@@ -48,21 +48,46 @@ public class HttpApi
 
     public async Task StartAsync(CancellationToken ct)
     {
-        var prefix = $"http://+:{_config.HttpPort}/";
-        _listener.Prefixes.Add(prefix);
+        // Try binding in order of preference:
+        // 1. http://+:port/ (all interfaces, requires admin or ACL)
+        // 2. http://*:port/ (alternative syntax)
+        // 3. http://0.0.0.0:port/ (explicit all interfaces)
+        // 4. http://localhost:port/ (fallback, local only)
+        var prefixes = new[]
+        {
+            $"http://+:{_config.HttpPort}/",
+            $"http://*:{_config.HttpPort}/",
+            $"http://0.0.0.0:{_config.HttpPort}/",
+            $"http://localhost:{_config.HttpPort}/"
+        };
 
-        try
+        foreach (var prefix in prefixes)
         {
-            _listener.Start();
-            Console.WriteLine($"[HTTP] Listening on port {_config.HttpPort}");
-        }
-        catch (HttpListenerException ex)
-        {
-            // Try localhost only if + fails (requires admin)
-            _listener.Prefixes.Clear();
-            _listener.Prefixes.Add($"http://localhost:{_config.HttpPort}/");
-            _listener.Start();
-            Console.WriteLine($"[HTTP] Listening on localhost:{_config.HttpPort} (run as admin for all interfaces)");
+            try
+            {
+                _listener.Prefixes.Clear();
+                _listener.Prefixes.Add(prefix);
+                _listener.Start();
+
+                if (prefix.Contains("localhost"))
+                {
+                    Console.WriteLine($"[HTTP] WARNING: Listening on localhost:{_config.HttpPort} only!");
+                    Console.WriteLine("[HTTP] External clients will NOT be able to connect.");
+                    Console.WriteLine("[HTTP] Run as Administrator or set up URL ACL:");
+                    Console.WriteLine($"[HTTP]   netsh http add urlacl url=http://+:{_config.HttpPort}/ user=Everyone");
+                }
+                else
+                {
+                    Console.WriteLine($"[HTTP] Listening on all interfaces, port {_config.HttpPort}");
+                }
+                break;
+            }
+            catch (HttpListenerException)
+            {
+                _listener.Close();
+                _listener = new HttpListener();
+                continue;
+            }
         }
 
         while (!ct.IsCancellationRequested)

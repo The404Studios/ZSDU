@@ -137,6 +137,10 @@ func play_reload() -> void:
 	is_reloading = true
 	_transition_to(AnimState.RELOAD)
 
+	# Fallback timer if no animation player (ensures reload completes)
+	if not animation_player or not animation_player.has_animation("reload"):
+		_start_reload_fallback_timer()
+
 
 ## Cancel reload animation
 func cancel_reload() -> void:
@@ -290,3 +294,32 @@ func apply_state(state: Dictionary) -> void:
 
 	is_ads = state.get("ads", false)
 	is_reloading = state.get("reload", false)
+
+
+## Fallback timer for reload when no animation exists
+## Uses the weapon's reload_time if available, otherwise 2.5s default
+func _start_reload_fallback_timer() -> void:
+	var reload_time := 2.5  # Default reload time
+
+	# Try to get actual reload time from parent's combat controller
+	var parent := get_parent()
+	if parent and parent.has_method("get_combat_controller"):
+		var combat: CombatController = parent.get_combat_controller()
+		if combat and combat.current_weapon:
+			reload_time = combat.current_weapon.reload_time
+
+	# Create one-shot timer
+	var timer := get_tree().create_timer(reload_time)
+	timer.timeout.connect(_on_reload_fallback_timeout)
+
+
+## Called when reload fallback timer completes
+func _on_reload_fallback_timeout() -> void:
+	if is_reloading:
+		is_reloading = false
+		# Emit the reload events that would normally come from animation
+		anim_event.emit("remove_mag")
+		anim_event.emit("insert_mag")
+		anim_event.emit("chamber")
+		anim_event.emit("reload_done")
+		_transition_to(AnimState.IDLE)

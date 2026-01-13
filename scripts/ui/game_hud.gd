@@ -14,6 +14,9 @@ var ammo_label: Label = null
 var weapon_label: Label = null
 var crosshair: Control = null
 
+# Team currency (EntityRegistry)
+var currency_label: Label = null
+
 # Game Over UI (created dynamically)
 var game_over_panel: Panel = null
 var game_over_title: Label = null
@@ -36,11 +39,16 @@ func _ready() -> void:
 	GameState.game_over.connect(_on_game_over)
 	GameState.extraction_available.connect(_on_extraction_available)
 
+	# Connect to EntityRegistry for currency updates
+	if EntityRegistry:
+		EntityRegistry.entity_event_received.connect(_on_entity_event)
+
 	# Create game over UI (hidden initially)
 	_create_game_over_ui()
 	_create_extraction_ui()
 	_create_weapon_hud()
 	_create_crosshair()
+	_create_currency_display()
 
 	# Initial state
 	_update_wave_display(0, 0)
@@ -466,3 +474,42 @@ func show_hit_marker() -> void:
 	for child in crosshair.get_children():
 		if child is ColorRect:
 			child.color = Color.WHITE
+
+
+# ============================================
+# TEAM CURRENCY (EntityRegistry)
+# ============================================
+
+func _create_currency_display() -> void:
+	# Create currency label (top left, below wave)
+	currency_label = Label.new()
+	currency_label.name = "CurrencyLabel"
+	currency_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	currency_label.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	currency_label.position = Vector2(20, 80)
+	currency_label.custom_minimum_size = Vector2(150, 30)
+	currency_label.add_theme_font_size_override("font_size", 20)
+	currency_label.add_theme_color_override("font_color", Color.GOLD)
+	currency_label.text = "Team: 100"
+	add_child(currency_label)
+
+	# Initial update
+	_update_currency_display()
+
+
+func _update_currency_display() -> void:
+	if not currency_label:
+		return
+
+	var currency := 0
+	if EntityRegistry:
+		currency = EntityRegistry.get_team_currency()
+
+	currency_label.text = "Team: %d" % currency
+
+
+func _on_entity_event(net_id: int, event: String, payload: Dictionary) -> void:
+	# Update currency on relevant events
+	match event:
+		"looted", "item_purchased", "item_sold", "turret_spawned", "turret_refilled":
+			_update_currency_display()
