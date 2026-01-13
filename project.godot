@@ -32,6 +32,7 @@ EconomyService="*res://scripts/autoload/economy_service.gd"
 CryptoUtils="*res://scripts/autoload/crypto_utils.gd"
 RaidManager="*res://scripts/autoload/raid_manager.gd"
 EntityRegistry="*res://scripts/autoload/entity_registry.gd"
+NetworkDebug="*res://scripts/debug/network_debug.gd"
 
 [display]
 
