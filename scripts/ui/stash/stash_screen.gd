@@ -618,22 +618,32 @@ func _quick_sell_item(item: StashItem) -> void:
 		_show_notification("Cannot sell locked items", Color(0.9, 0.3, 0.3))
 		return
 
-	var value: int = item.item_def.get("value", 0)
+	var value: int = item.item_def.get("value", item.item_def.get("base_value", 0))
 	var stack: int = item.item_data.get("stack", 1)
-	var total := value * stack
+	# Quick sell is at 50% value (same as trader rate)
+	var sell_value := int(value * 0.5 * stack)
 
 	var confirm := ConfirmationDialog.new()
-	confirm.dialog_text = "Sell %s for ₽%d?" % [item.item_def.get("name", item.def_id), total]
+	confirm.dialog_text = "Quick sell %s for ₽%d?" % [item.item_def.get("name", item.def_id), sell_value]
 	confirm.confirmed.connect(func():
-		# Quick sell at reduced rate (70%)
-		var sell_value := int(total * 0.7)
-		EconomyService.discard_item(item.iid)  # Remove item
-		EconomyService.add_gold(sell_value)  # Add gold
-		_show_notification("Sold for ₽%d" % sell_value, Color(0.9, 0.8, 0.3))
+		# Use general merchant for quick sell
+		_execute_quick_sell(item.iid, sell_value)
 	)
 	confirm.canceled.connect(func(): confirm.queue_free())
 	add_child(confirm)
 	confirm.popup_centered()
+
+
+func _execute_quick_sell(iid: String, expected_value: int) -> void:
+	_show_notification("Selling...", Color(0.7, 0.7, 0.7))
+
+	# Use trader sell mechanism with generic merchant
+	var success := await EconomyService.sell_to_trader("merchant_general", iid)
+
+	if success:
+		_show_notification("Sold for ~₽%d" % expected_value, Color(0.9, 0.8, 0.3))
+	else:
+		_show_notification("Sale failed", Color(0.9, 0.3, 0.3))
 
 
 func _show_split_dialog(item: StashItem) -> void:
