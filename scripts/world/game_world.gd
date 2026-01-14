@@ -13,7 +13,7 @@ extends Node3D
 @onready var props_container: Node = $Props
 @onready var spawn_points: Node = $SpawnPoints
 @onready var wave_manager: WaveManager = $WaveManager if has_node("WaveManager") else null
-@onready var hud: Control = $HUD if has_node("HUD") else null
+@onready var hud = $HUD if has_node("HUD") else null
 
 # Sigil (defense objective)
 var sigil: Sigil = null
