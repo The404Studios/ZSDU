@@ -53,9 +53,9 @@ func slide_in(control: Control, direction: Direction = Direction.LEFT,
 	var tween := control.create_tween()
 	tween.set_parallel(true)
 
-	var ease := EASE_MAP[ease_type]
+	var ease_config: Array = EASE_MAP[ease_type]
 	tween.tween_property(control, "position", target_pos, duration)\
-		.set_trans(ease[0]).set_ease(ease[1])
+		.set_trans(ease_config[0]).set_ease(ease_config[1])
 	tween.tween_property(control, "modulate:a", 1.0, duration * 0.5)
 
 	tween.finished.connect(func(): finished.emit())
@@ -71,9 +71,9 @@ func slide_out(control: Control, direction: Direction = Direction.LEFT,
 	var tween := control.create_tween()
 	tween.set_parallel(true)
 
-	var ease := EASE_MAP[ease_type]
+	var ease_config: Array = EASE_MAP[ease_type]
 	tween.tween_property(control, "position", target_pos, duration)\
-		.set_trans(ease[0]).set_ease(ease[1])
+		.set_trans(ease_config[0]).set_ease(ease_config[1])
 	tween.tween_property(control, "modulate:a", 0.0, duration * 0.5).set_delay(duration * 0.3)
 
 	tween.finished.connect(func():

@@ -108,7 +108,7 @@ func _init() -> void:
 
 ## Get total attribute value (base + all bonuses)
 func get_attribute(attr: Attribute) -> int:
-	var total := base_attributes.get(attr, BASE_ATTRIBUTE)
+	var total: int = base_attributes.get(attr, BASE_ATTRIBUTE)
 	total += equipment_bonuses.get(attr, 0)
 	total += _get_buff_bonus(attr)
 	total += perk_bonuses.get(attr, 0)
@@ -139,7 +139,7 @@ func increase_attribute(attr: Attribute, amount: int = 1) -> bool:
 	if base_attributes[attr] + amount > MAX_ATTRIBUTE:
 		return false
 
-	var old_value := base_attributes[attr]
+	var old_value: int = base_attributes[attr]
 	base_attributes[attr] += amount
 	attribute_points -= amount
 

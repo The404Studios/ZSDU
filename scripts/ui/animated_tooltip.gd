@@ -15,8 +15,8 @@ class_name AnimatedTooltip
 ##   tooltip.show_attribute(attr_data, anchor_position)
 ##   tooltip.hide_tooltip()
 
-signal shown
-signal hidden
+signal tooltip_shown
+signal tooltip_hidden
 
 # Style constants
 const PADDING := 12
@@ -378,7 +378,7 @@ func hide_tooltip() -> void:
 		current_tween.kill()
 
 	current_tween = anim.tooltip_hide(self)
-	current_tween.finished.connect(func(): hidden.emit(), CONNECT_ONE_SHOT)
+	current_tween.finished.connect(func(): tooltip_hidden.emit(), CONNECT_ONE_SHOT)
 
 
 # ============================================
@@ -514,7 +514,7 @@ func _show_at_position(anchor_pos: Vector2) -> void:
 	current_tween.tween_property(self, "scale", Vector2.ONE, 0.15)\
 		.set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
-	current_tween.finished.connect(func(): shown.emit(), CONNECT_ONE_SHOT)
+	current_tween.finished.connect(func(): tooltip_shown.emit(), CONNECT_ONE_SHOT)
 
 
 ## Static helper to create and show a tooltip

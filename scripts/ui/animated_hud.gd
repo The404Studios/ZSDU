@@ -22,6 +22,9 @@ signal kill_registered(enemy_name: String, is_headshot: bool)
 # UI Animation helper
 var anim := UIAnimations.new()
 
+# Root control (for modulate/visibility)
+var root: Control
+
 # Health bar
 var health_container: Control
 var health_bar: ProgressBar
@@ -91,7 +94,7 @@ func _process(delta: float) -> void:
 # ============================================
 
 func _build_ui() -> void:
-	var root := Control.new()
+	root = Control.new()
 	root.set_anchors_preset(Control.PRESET_FULL_RECT)
 	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(root)
@@ -281,7 +284,7 @@ func _build_ammo_display(parent: Control) -> void:
 
 func _build_wave_display(parent: Control) -> void:
 	wave_container = Control.new()
-	wave_container.set_anchors_preset(Control.PRESET_TOP_CENTER)
+	wave_container.set_anchors_preset(Control.PRESET_CENTER_TOP)
 	wave_container.position = Vector2(-100, 20)
 	wave_container.size = Vector2(200, 80)
 	wave_container.modulate.a = 0.0
@@ -634,8 +637,8 @@ func _on_kill_registered(enemy_name: String, is_headshot: bool) -> void:
 
 	# Limit entries
 	while kill_feed_entries.size() > kill_feed_max:
-		var old := kill_feed_entries.pop_front()
-		old.queue_free()
+		var old_entry: Control = kill_feed_entries.pop_front()
+		old_entry.queue_free()
 
 	# Animate in
 	entry.modulate.a = 0.0
@@ -753,12 +756,14 @@ func connect_to_player(player: PlayerController) -> void:
 ## Show/hide HUD with animation
 func show_hud() -> void:
 	visible = true
-	modulate.a = 0.0
-	var tween := create_tween()
-	tween.tween_property(self, "modulate:a", 1.0, 0.3)
+	if root:
+		root.modulate.a = 0.0
+		var tween := root.create_tween()
+		tween.tween_property(root, "modulate:a", 1.0, 0.3)
 
 
 func hide_hud() -> void:
-	var tween := create_tween()
-	tween.tween_property(self, "modulate:a", 0.0, 0.3)
-	tween.tween_callback(func(): visible = false)
+	if root:
+		var tween := root.create_tween()
+		tween.tween_property(root, "modulate:a", 0.0, 0.3)
+		tween.tween_callback(func(): visible = false)

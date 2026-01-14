@@ -33,7 +33,7 @@ signal ads_changed(is_ads: bool)
 @export_group("Recoil")
 @export var recoil_kick_back := 0.05
 @export var recoil_kick_up := 0.02
-@export var recoil_rotation := 3.0
+@export var recoil_rotation_amount := 3.0
 @export var recoil_recovery_speed := 8.0
 @export var recoil_snap_speed := 25.0
 
@@ -188,9 +188,9 @@ func apply_recoil(multiplier: float = 1.0) -> void:
 
 	# Rotation kick
 	var rot_kick := Vector3(
-		deg_to_rad(recoil_rotation) * multiplier,
-		deg_to_rad(randf_range(-recoil_rotation, recoil_rotation) * 0.3) * multiplier,
-		deg_to_rad(randf_range(-recoil_rotation, recoil_rotation) * 0.2) * multiplier
+		deg_to_rad(recoil_rotation_amount) * multiplier,
+		deg_to_rad(randf_range(-recoil_rotation_amount, recoil_rotation_amount) * 0.3) * multiplier,
+		deg_to_rad(randf_range(-recoil_rotation_amount, recoil_rotation_amount) * 0.2) * multiplier
 	)
 	recoil_rotation += rot_kick
 
@@ -372,37 +372,37 @@ func configure_for_weapon(weapon_type: String) -> void:
 		"pistol":
 			recoil_kick_back = 0.03
 			recoil_kick_up = 0.015
-			recoil_rotation = 2.0
+			recoil_rotation_amount = 2.0
 			bob_amplitude = 0.015
 
 		"rifle":
 			recoil_kick_back = 0.04
 			recoil_kick_up = 0.02
-			recoil_rotation = 2.5
+			recoil_rotation_amount = 2.5
 			bob_amplitude = 0.02
 
 		"shotgun":
 			recoil_kick_back = 0.08
 			recoil_kick_up = 0.04
-			recoil_rotation = 5.0
+			recoil_rotation_amount = 5.0
 			bob_amplitude = 0.025
 
 		"sniper":
 			recoil_kick_back = 0.06
 			recoil_kick_up = 0.03
-			recoil_rotation = 4.0
+			recoil_rotation_amount = 4.0
 			bob_amplitude = 0.015
 			sway_amount = 0.03  # More sway when not ADS
 
 		"smg":
 			recoil_kick_back = 0.025
 			recoil_kick_up = 0.012
-			recoil_rotation = 1.5
+			recoil_rotation_amount = 1.5
 			bob_amplitude = 0.018
 
 		"melee":
 			recoil_kick_back = 0.0
 			recoil_kick_up = 0.0
-			recoil_rotation = 0.0
+			recoil_rotation_amount = 0.0
 			bob_amplitude = 0.03
 			sway_amount = 0.015
