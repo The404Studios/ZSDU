@@ -907,7 +907,7 @@ func reset_for_new_round() -> void:
 	# Clear all non-player, non-prop entities
 	var to_remove := []
 	for net_id in entity_types:
-		var type := entity_types[net_id]
+		var type: int = entity_types[net_id]
 		if type != EntityType.PLAYER and type != EntityType.PROP:
 			to_remove.append(net_id)
 
