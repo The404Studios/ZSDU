@@ -47,6 +47,11 @@ var stamina: float = 100.0
 var is_sprinting: bool = false
 var last_stamina_drain_time: float = 0.0
 
+# Attribute multipliers (set by PlayerController from AttributeSystem)
+var attribute_move_speed_mult: float = 1.0
+var attribute_sprint_speed_mult: float = 1.0
+var attribute_stamina_regen_mult: float = 1.0
+
 # References
 var body: CharacterBody3D = null
 var collision_shape: CollisionShape3D = null
@@ -81,12 +86,12 @@ func process_input(input: PlayerInput, delta: float) -> void:
 
 	is_sprinting = can_sprint
 
-	# Get movement speed based on posture
-	var speed := _get_movement_speed()
+	# Get movement speed based on posture (with attribute bonus)
+	var speed := _get_movement_speed() * attribute_move_speed_mult
 
-	# Apply sprint speed
+	# Apply sprint speed (with attribute bonus)
 	if is_sprinting:
-		speed = sprint_speed
+		speed = sprint_speed * attribute_sprint_speed_mult
 
 	# Calculate desired velocity
 	desired_velocity = input.move_dir * speed
@@ -227,7 +232,9 @@ func _regenerate_stamina(delta: float) -> void:
 	if time_now - last_stamina_drain_time < stamina_regen_delay:
 		return
 
-	stamina = minf(max_stamina, stamina + stamina_regen * delta)
+	# Apply attribute regen multiplier
+	var regen_amount := stamina_regen * attribute_stamina_regen_mult * delta
+	stamina = minf(max_stamina, stamina + regen_amount)
 	stamina_changed.emit(stamina, max_stamina)
 
 

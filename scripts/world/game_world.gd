@@ -53,8 +53,14 @@ func _ready() -> void:
 	# Connect to GameDirector (new system) or WaveManager (legacy)
 	if GameDirector:
 		GameState.zombie_killed.connect(GameDirector.on_zombie_killed)
+		# Sync GameDirector waves to GameState for server-side tracking
+		GameDirector.wave_started.connect(_on_game_director_wave_started)
+		GameDirector.wave_ended.connect(_on_game_director_wave_ended)
 	elif wave_manager:
 		GameState.zombie_killed.connect(wave_manager.on_zombie_killed)
+
+	# Connect HUD to game state if present
+	_setup_hud_connections()
 
 	# Spawn existing players (for late joiners)
 	for peer_id in NetworkManager.connected_peers:
@@ -89,6 +95,15 @@ func _setup_sigil() -> void:
 			sigil.global_position = sigil_position
 			add_child(sigil)
 			print("[GameWorld] Created sigil at %s" % sigil_position)
+
+	# Connect sigil signals for game state tracking
+	if sigil:
+		sigil.sigil_destroyed.connect(_on_sigil_destroyed)
+		sigil.sigil_damaged.connect(_on_sigil_damaged)
+		sigil.sigil_corrupted.connect(_on_sigil_corrupted)
+		# Pass sigil reference to GameDirector
+		if GameDirector:
+			GameDirector.sigil = sigil
 
 
 func _setup_spawn_lane() -> void:
@@ -279,21 +294,29 @@ func _get_player_spawn_info(peer_id: int) -> Dictionary:
 
 
 func _equip_player(player: PlayerController) -> void:
-	# Give default weapons if no loadout exists
 	var inventory := player.get_inventory_runtime()
-	if inventory and inventory.get_weapon(0) == null:
-		inventory.setup_default_loadout()
-		print("[GameWorld] Gave default loadout to player %d" % player.peer_id)
+	var equipment := player.get_equipment_runtime()
 
-		# Bind primary weapon to combat controller
-		var combat := player.get_combat_controller()
-		if combat:
-			var weapon := inventory.get_weapon(0)
-			if weapon:
-				combat.bind_weapon(weapon)
-				print("[GameWorld] Bound weapon '%s' to player %d" % [weapon.name, player.peer_id])
+	# Try to apply loadout from EconomyService (if player prepared a raid)
+	var loadout_applied := false
+	if EconomyService and EconomyService.is_logged_in:
+		loadout_applied = _apply_loadout_from_economy(player, inventory, equipment)
 
-	# Give hammer (barricading tool, not a combat WeaponRuntime)
+	# Fall back to default loadout if no prepared loadout
+	if not loadout_applied:
+		if inventory and inventory.get_weapon(0) == null:
+			inventory.setup_default_loadout()
+			print("[GameWorld] Gave default loadout to player %d" % player.peer_id)
+
+			# Bind primary weapon to combat controller
+			var combat := player.get_combat_controller()
+			if combat:
+				var weapon := inventory.get_weapon(0)
+				if weapon:
+					combat.bind_weapon(weapon)
+					print("[GameWorld] Bound weapon '%s' to player %d" % [weapon.name, player.peer_id])
+
+	# Give hammer (barricading tool, always available)
 	var hammer_scene := load("res://scenes/weapons/hammer.tscn")
 	if hammer_scene:
 		var hammer: Hammer = hammer_scene.instantiate()
@@ -306,6 +329,84 @@ func _equip_player(player: PlayerController) -> void:
 
 		# Store hammer reference on player for access via get_meta
 		player.set_meta("hammer", hammer)
+
+
+## Apply loadout from EconomyService (prepared raid items)
+func _apply_loadout_from_economy(player: PlayerController, inventory: InventoryRuntime, equipment: EquipmentRuntime) -> bool:
+	var locked_iids: Array = EconomyService.locked_iids
+	if locked_iids.is_empty():
+		return false
+
+	print("[GameWorld] Applying loadout with %d locked items for player %d" % [locked_iids.size(), player.peer_id])
+
+	var equipped_primary := false
+
+	for iid in locked_iids:
+		var item: Dictionary = EconomyService.get_item(iid)
+		if item.is_empty():
+			continue
+
+		var def_id: String = item.get("def_id", item.get("defId", ""))
+		var item_def: Dictionary = EconomyService.get_item_def(def_id)
+		var category: String = item_def.get("category", "misc").to_lower()
+
+		# Handle weapons
+		if category in ["weapon", "rifle", "shotgun", "smg", "pistol"]:
+			if inventory:
+				var weapon := _create_weapon_from_item(item, item_def)
+				if weapon:
+					var slot := 0 if not equipped_primary else 1
+					inventory.add_weapon(weapon, slot)
+					print("[GameWorld] Equipped %s in slot %d" % [weapon.name, slot])
+
+					if slot == 0:
+						equipped_primary = true
+						var combat := player.get_combat_controller()
+						if combat:
+							combat.bind_weapon(weapon)
+
+		# Handle armor/equipment
+		elif category in ["helmet", "headwear"]:
+			if equipment:
+				equipment.equip_item("helmet", item)
+				print("[GameWorld] Equipped helmet: %s" % item_def.get("name", def_id))
+
+		elif category in ["armor", "vest"]:
+			if equipment:
+				equipment.equip_item("vest", item)
+				print("[GameWorld] Equipped vest: %s" % item_def.get("name", def_id))
+
+		elif category in ["rig", "tactical_rig"]:
+			if equipment:
+				equipment.equip_item("rig", item)
+				print("[GameWorld] Equipped rig: %s" % item_def.get("name", def_id))
+
+		elif category in ["backpack", "bag"]:
+			if equipment:
+				equipment.equip_item("backpack", item)
+				print("[GameWorld] Equipped backpack: %s" % item_def.get("name", def_id))
+
+		# Handle consumables/ammo - add to inventory
+		elif category in ["ammo", "medical", "consumable"]:
+			if inventory:
+				inventory.add_item_to_container(item, item_def)
+
+	return locked_iids.size() > 0
+
+
+## Create a WeaponRuntime from item data
+func _create_weapon_from_item(item: Dictionary, item_def: Dictionary) -> WeaponRuntime:
+	var weapon := WeaponRuntime.new()
+	weapon.name = item_def.get("name", "Weapon")
+	weapon.weapon_type = item_def.get("weapon_type", "rifle")
+	weapon.damage = item_def.get("damage", 25.0)
+	weapon.fire_rate = item_def.get("fire_rate", 0.1)
+	weapon.magazine_size = item_def.get("magazine_size", 30)
+	weapon.current_ammo = item.get("ammo", weapon.magazine_size)
+	weapon.reload_time = item_def.get("reload_time", 2.0)
+	weapon.range_max = item_def.get("range", 100.0)
+	weapon.spread_base = item_def.get("spread", 0.02)
+	return weapon
 
 
 ## Fast round reset (for testing or game restart)
@@ -357,3 +458,129 @@ func _input(event: InputEvent) -> void:
 			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 		else:
 			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+
+# ============================================
+# GAME DIRECTOR SIGNAL HANDLERS
+# ============================================
+
+## Sync GameDirector wave to GameState (server-side)
+func _on_game_director_wave_started(wave: int, pressure: Dictionary) -> void:
+	if not NetworkManager.is_authority():
+		return
+
+	# Update GameState to match GameDirector
+	GameState.current_wave = wave
+	GameState.wave_zombies_remaining = pressure.get("zombie_count", 0)
+	GameState.wave_zombies_killed = 0
+	GameState.current_phase = GameState.GamePhase.WAVE_ACTIVE
+
+	# Emit GameState signal for local HUD updates
+	GameState.wave_started.emit(wave)
+	GameState.phase_changed.emit(GameState.current_phase)
+
+	print("[GameWorld] Wave %d started - %d zombies" % [wave, pressure.zombie_count])
+
+
+func _on_game_director_wave_ended(wave: int, stats: Dictionary) -> void:
+	if not NetworkManager.is_authority():
+		return
+
+	GameState.current_phase = GameState.GamePhase.WAVE_INTERMISSION
+	GameState.wave_ended.emit(wave)
+	GameState.phase_changed.emit(GameState.current_phase)
+
+	print("[GameWorld] Wave %d ended - Sigil HP: %.0f" % [wave, stats.get("sigil_health", 0)])
+
+
+# ============================================
+# SIGIL SIGNAL HANDLERS
+# ============================================
+
+func _on_sigil_destroyed() -> void:
+	print("[GameWorld] SIGIL DESTROYED - GAME OVER")
+
+	# Stop GameDirector from spawning more zombies
+	if GameDirector:
+		GameDirector.wave_active = false
+
+	# GameState._trigger_game_over is already called by Sigil
+
+
+func _on_sigil_damaged(damage: float, current_health: float) -> void:
+	# Broadcast sigil damage to clients for HUD updates
+	if NetworkManager.is_authority():
+		NetworkManager.broadcast_event.rpc("sigil_damaged", {
+			"damage": damage,
+			"health": current_health,
+			"max_health": sigil.max_health if sigil else 1000.0
+		})
+
+
+func _on_sigil_corrupted() -> void:
+	# A zombie reached the sigil
+	if NetworkManager.is_authority():
+		NetworkManager.broadcast_event.rpc("sigil_corrupted", {
+			"corruption_count": sigil.total_corruption if sigil else 0
+		})
+
+
+# ============================================
+# HUD CONNECTIONS
+# ============================================
+
+func _setup_hud_connections() -> void:
+	# Find HUD in scene
+	var animated_hud: AnimatedHUD = null
+
+	if hud and hud is AnimatedHUD:
+		animated_hud = hud as AnimatedHUD
+	else:
+		# Look for HUD in UI layer
+		animated_hud = get_node_or_null("/root/AnimatedHUD") as AnimatedHUD
+		if not animated_hud:
+			# Look for it as child
+			for child in get_children():
+				if child is AnimatedHUD:
+					animated_hud = child as AnimatedHUD
+					break
+
+	if not animated_hud:
+		print("[GameWorld] No AnimatedHUD found - skipping HUD connections")
+		return
+
+	# Connect GameState signals to HUD
+	GameState.wave_started.connect(func(wave_num: int):
+		animated_hud.wave_started.emit(wave_num)
+	)
+
+	GameState.zombie_killed.connect(func(zombie_id: int):
+		# Get zombie type for kill feed
+		var zombie_type := "Zombie"
+		animated_hud.kill_registered.emit(zombie_type, false)
+	)
+
+	GameState.hit_confirmed.connect(func(peer_id: int, hit_data: Dictionary):
+		# Show hit marker for local player
+		var local_peer := multiplayer.get_unique_id()
+		if peer_id == local_peer:
+			var is_kill: bool = hit_data.get("target_type", "") == "zombie"
+			var is_headshot: bool = hit_data.get("is_headshot", false)
+			animated_hud.show_hit_marker(is_kill, is_headshot)
+	)
+
+	GameState.game_over.connect(func(reason: String, victory: bool):
+		# Could show game over UI here
+		print("[HUD] Game Over: %s (%s)" % [reason, "Victory" if victory else "Defeat"])
+	)
+
+	# Connect sigil signals to HUD
+	GameState.sigil_damaged.connect(func(damage: float, health: float, max_health: float):
+		animated_hud.update_sigil_health(health, max_health)
+	)
+
+	GameState.sigil_corrupted.connect(func(corruption_count: int):
+		animated_hud.on_sigil_corrupted()
+	)
+
+	print("[GameWorld] HUD connections established")

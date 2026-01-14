@@ -18,6 +18,8 @@ signal hit_confirmed(peer_id: int, hit_data: Dictionary)
 signal game_over(reason: String, victory: bool)
 signal extraction_available()
 signal player_extracted(peer_id: int)
+signal sigil_damaged(damage: float, current_health: float, max_health: float)
+signal sigil_corrupted(corruption_count: int)
 
 enum GamePhase {
 	LOBBY,
@@ -46,10 +48,19 @@ var zombies: Dictionary = {}  # zombie_id -> Zombie node
 var props: Dictionary = {}    # prop_id -> Prop node
 var nails: Dictionary = {}    # nail_id -> Nail data
 
+# Pending state for late joiners (client-side)
+# When snapshot arrives before entity exists, store state here
+var _pending_prop_state: Dictionary = {}  # prop_id -> state dict
+
 # ID counters (server-side)
 var _next_zombie_id: int = 1
 var _next_prop_id: int = 1
 var _next_nail_id: int = 1
+
+# Network throttling (send updates at ~20 tick/s instead of 60)
+const NETWORK_TICK_RATE := 20  # Updates per second
+var _network_tick_counter: int = 0
+var _physics_ticks_per_network_tick: int = 3  # 60/20 = 3
 
 # References
 var world_node: Node3D = null
@@ -82,11 +93,15 @@ func _physics_process(_delta: float) -> void:
 
 ## Server tick - runs every physics frame on server
 func _server_tick() -> void:
-	# Build and broadcast state snapshot
-	var snapshot := _build_snapshot()
-	NetworkManager.broadcast_state_update.rpc(snapshot)
+	# Throttle network updates (60 fps physics -> 20 fps network)
+	_network_tick_counter += 1
+	if _network_tick_counter >= _physics_ticks_per_network_tick:
+		_network_tick_counter = 0
+		# Build and broadcast state snapshot
+		var snapshot := _build_snapshot()
+		NetworkManager.broadcast_state_update.rpc(snapshot)
 
-	# Process entity AI (turrets)
+	# Process entity AI (turrets) - every frame for smooth movement
 	if EntityRegistry:
 		EntityRegistry.process_turrets(get_physics_process_delta_time())
 
@@ -216,6 +231,8 @@ func process_action_request(peer_id: int, action_type: String, action_data: Dict
 			_handle_nail_while_holding(peer_id, action_data)
 		"shoot":
 			_handle_shoot(peer_id, action_data)
+		"melee_attack":
+			_handle_melee_attack(peer_id, action_data)
 
 
 ## Handle event from server (client-side)
@@ -225,6 +242,8 @@ func handle_event(event_type: String, event_data: Dictionary) -> void:
 			_spawn_player_local(event_data.peer_id, event_data.position)
 		"spawn_zombie":
 			_spawn_zombie_local(event_data.zombie_id, event_data.position, event_data.zombie_type)
+		"zombie_killed":
+			_kill_zombie_local(event_data.zombie_id)
 		"nail_created":
 			_create_nail_local(event_data)
 		"nail_destroyed":
@@ -254,6 +273,10 @@ func handle_event(event_type: String, event_data: Dictionary) -> void:
 			_handle_extraction_unlocked_event(event_data)
 		"player_extracted":
 			_handle_player_extracted_event(event_data)
+		"sigil_damaged":
+			_handle_sigil_damaged_event(event_data)
+		"sigil_corrupted":
+			_handle_sigil_corrupted_event(event_data)
 
 
 ## Handle game over event (client-side)
@@ -288,6 +311,24 @@ func _handle_player_extracted_event(event_data: Dictionary) -> void:
 	print("[GameState] Player %d extracted!" % peer_id)
 
 	player_extracted.emit(peer_id)
+
+
+## Handle sigil damaged event (client-side)
+func _handle_sigil_damaged_event(event_data: Dictionary) -> void:
+	var damage: float = event_data.get("damage", 0.0)
+	var health: float = event_data.get("health", 0.0)
+	var max_health: float = event_data.get("max_health", 1000.0)
+
+	sigil_damaged.emit(damage, health, max_health)
+
+
+## Handle sigil corrupted event (client-side)
+func _handle_sigil_corrupted_event(event_data: Dictionary) -> void:
+	var corruption_count: int = event_data.get("corruption_count", 0)
+
+	print("[GameState] Sigil corrupted! Count: %d" % corruption_count)
+
+	sigil_corrupted.emit(corruption_count)
 
 
 ## Called when a player disconnects
@@ -327,6 +368,10 @@ func initialize_world(world: Node3D) -> void:
 func spawn_player(peer_id: int, position: Vector3 = Vector3.ZERO) -> Node3D:
 	if not NetworkManager.is_authority():
 		return null
+
+	# Prevent duplicate spawns
+	if peer_id in players:
+		return players[peer_id]
 
 	if not player_scene:
 		push_error("Player scene not loaded")
@@ -436,6 +481,24 @@ func _spawn_zombie_local(zombie_id: int, position: Vector3, zombie_type: String)
 	zombie_spawned.emit(zombie_id)
 
 
+## Kill zombie locally (client-side, from server event)
+func _kill_zombie_local(zombie_id: int) -> void:
+	if zombie_id not in zombies:
+		return
+
+	var zombie: Node3D = zombies[zombie_id]
+	if is_instance_valid(zombie):
+		# Play death animation if available
+		if zombie.has_method("play_death"):
+			zombie.play_death()
+		else:
+			# Immediate removal if no death animation
+			zombie.queue_free()
+
+	zombies.erase(zombie_id)
+	zombie_killed.emit(zombie_id)
+
+
 ## Kill a zombie (server-side)
 func kill_zombie(zombie_id: int) -> void:
 	if not NetworkManager.is_authority():
@@ -461,6 +524,14 @@ func kill_zombie(zombie_id: int) -> void:
 
 		zombies.erase(zombie_id)
 		wave_zombies_killed += 1
+
+		# Broadcast zombie death to all clients
+		NetworkManager.broadcast_event.rpc("zombie_killed", {
+			"zombie_id": zombie_id,
+			"position": zombie_pos,
+			"zombie_type": zombie_type
+		})
+
 		zombie_killed.emit(zombie_id)
 
 
@@ -1141,6 +1212,79 @@ func _damage_player(target_peer_id: int, damage: float, hit_position: Vector3) -
 		player.take_damage(damage, hit_position)
 
 
+## Handle melee attack request (server-side)
+## Used by hammer and melee weapons (knife, machete, etc.)
+func _handle_melee_attack(peer_id: int, data: Dictionary) -> void:
+	if peer_id not in players:
+		return
+
+	var player: Node3D = players[peer_id]
+	if not is_instance_valid(player):
+		return
+
+	var origin: Vector3 = data.get("origin", Vector3.ZERO)
+	var direction: Vector3 = data.get("direction", Vector3.FORWARD).normalized()
+	var damage: float = data.get("damage", 10.0)
+	var weapon: String = data.get("weapon", "melee")
+	var hit_position: Vector3 = data.get("hit_position", origin + direction * 2.0)
+
+	# Validate origin is near player
+	var player_pos: Vector3 = player.global_position
+	if origin.distance_to(player_pos) > 3.0:
+		push_warning("[GameState] Suspicious melee origin from peer %d" % peer_id)
+		return
+
+	# Validate player is alive
+	var player_health: float = 100.0
+	if "health" in player:
+		player_health = player.health
+	if player_health <= 0:
+		return
+
+	# Server performs its own raycast to validate the hit
+	if not world_node:
+		return
+
+	var space_state := world_node.get_world_3d().direct_space_state
+	var query := PhysicsRayQueryParameters3D.create(origin, origin + direction * 3.0)
+	query.collision_mask = 0b00000100  # Zombies only for melee
+
+	if player is CollisionObject3D:
+		query.exclude = [player.get_rid()]
+
+	var result := space_state.intersect_ray(query)
+
+	if not result:
+		return
+
+	var collider: Node = result.collider
+	var server_hit_pos: Vector3 = result.position
+
+	# Build hit data
+	var hit_data := {
+		"shooter_id": peer_id,
+		"position": server_hit_pos,
+		"damage": damage,
+		"weapon": weapon,
+		"is_melee": true,
+		"target_type": "unknown",
+		"target_id": -1,
+	}
+
+	# Process hit on zombie
+	if collider.is_in_group("zombies"):
+		var zombie_id: int = collider.zombie_id if "zombie_id" in collider else -1
+		if zombie_id >= 0:
+			hit_data["target_type"] = "zombie"
+			hit_data["target_id"] = zombie_id
+			_damage_zombie(zombie_id, damage, server_hit_pos)
+
+	# Broadcast hit confirmation
+	if NetworkManager:
+		NetworkManager.broadcast_event.rpc("hit_confirmed", hit_data)
+	hit_confirmed.emit(peer_id, hit_data)
+
+
 # ============================================
 # WAVE SYSTEM
 # ============================================
@@ -1421,6 +1565,11 @@ func apply_full_snapshot(state: Dictionary) -> void:
 					prop.sleeping = prop_data.get("sleeping", false)
 					prop.linear_velocity = prop_data.get("linear_velocity", Vector3.ZERO)
 					prop.angular_velocity = prop_data.get("angular_velocity", Vector3.ZERO)
+			else:
+				# Prop doesn't exist yet - store pending state
+				# Will be applied when prop registers itself
+				_pending_prop_state[prop_id] = prop_data
+				print("[GameState] Stored pending state for prop %d" % prop_id)
 
 	# Reconstruct nails with joints
 	if "nails" in state:
@@ -1477,6 +1626,7 @@ var _prop_registry: Dictionary = {}  # prop_id -> { scene_path, original_positio
 
 
 ## Register a prop with its original state (server-side, called at world init)
+## Use register_prop_with_id for scene-placed props with deterministic IDs
 func register_prop_with_state(prop: RigidBody3D, scene_path: String = "") -> int:
 	var prop_id := _next_prop_id
 	_next_prop_id += 1
@@ -1493,6 +1643,53 @@ func register_prop_with_state(prop: RigidBody3D, scene_path: String = "") -> int
 	}
 
 	return prop_id
+
+
+## Register a prop with a specific ID (server-side, for scene-placed props with deterministic IDs)
+func register_prop_with_id(prop: RigidBody3D, prop_id: int, scene_path: String = "") -> void:
+	if not NetworkManager.is_authority():
+		return
+
+	prop.set("prop_id", prop_id)
+	props[prop_id] = prop
+
+	# Update next_prop_id to avoid collisions with dynamically spawned props
+	_next_prop_id = maxi(_next_prop_id, prop_id + 1)
+
+	# Store original state for reset
+	_prop_registry[prop_id] = {
+		"scene_path": scene_path,
+		"original_position": prop.global_position,
+		"original_rotation": prop.rotation,
+		"original_mass": prop.mass,
+	}
+
+
+## Register a prop on client-side and apply any pending state from late-join snapshot
+func register_prop_client(prop: RigidBody3D, prop_id: int) -> void:
+	if NetworkManager.is_authority():
+		return  # Server uses register_prop_with_state instead
+
+	prop.set("prop_id", prop_id)
+	props[prop_id] = prop
+
+	# Check for pending state from late-join snapshot
+	if prop_id in _pending_prop_state:
+		var pending: Dictionary = _pending_prop_state[prop_id]
+		print("[GameState] Applying pending state to prop %d" % prop_id)
+
+		prop.global_position = pending.get("position", prop.global_position)
+		prop.rotation = pending.get("rotation", prop.rotation)
+		prop.sleeping = pending.get("sleeping", false)
+		prop.linear_velocity = pending.get("linear_velocity", Vector3.ZERO)
+		prop.angular_velocity = pending.get("angular_velocity", Vector3.ZERO)
+
+		# Apply mode/holder state if prop supports it
+		if prop.has_method("apply_network_state"):
+			prop.apply_network_state(pending)
+
+		_pending_prop_state.erase(prop_id)
+		print("[GameState] Prop %d state applied, %d pending remaining" % [prop_id, _pending_prop_state.size()])
 
 
 ## Get prop's original state

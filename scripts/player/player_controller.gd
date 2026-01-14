@@ -42,6 +42,8 @@ var movement_controller: MovementController = null
 var combat_controller: CombatController = null
 var animation_controller: AnimationController = null
 var inventory_runtime: InventoryRuntime = null
+var equipment_runtime: EquipmentRuntime = null
+var attribute_system: AttributeSystem = null
 var network_controller: PlayerNetworkController = null
 
 # Prop handler (for barricade system)
@@ -82,6 +84,15 @@ func _setup_controllers() -> void:
 	inventory_runtime = InventoryRuntime.new()
 	inventory_runtime.name = "InventoryRuntime"
 	add_child(inventory_runtime)
+
+	# Equipment Runtime (armor, rig, accessories)
+	equipment_runtime = EquipmentRuntime.new()
+
+	# Attribute System (STR, AGI, END, INT, LCK)
+	attribute_system = AttributeSystem.new()
+	attribute_system.setup_default()
+	attribute_system.derived_stats_updated.connect(_on_derived_stats_updated)
+	attribute_system.level_up.connect(_on_level_up)
 
 	# Combat Controller
 	combat_controller = CombatController.new()
@@ -318,14 +329,21 @@ func apply_input(input_data: Dictionary) -> void:
 
 
 ## Take damage (server-side only)
-func take_damage(amount: float, _from_position: Vector3 = Vector3.ZERO) -> void:
+## damage_type: "bullet", "blunt", "pierce", "zombie"
+## is_headshot: True if the hit was to the head
+func take_damage(amount: float, _from_position: Vector3 = Vector3.ZERO, damage_type: String = "bullet", is_headshot: bool = false) -> void:
 	if not NetworkManager.is_authority():
 		return
 
 	if is_dead:
 		return
 
-	health -= amount
+	# Apply armor reduction
+	var final_damage := amount
+	if equipment_runtime:
+		final_damage = equipment_runtime.apply_armor(amount, damage_type, is_headshot)
+
+	health -= final_damage
 
 	if health <= 0:
 		health = 0
@@ -421,5 +439,45 @@ func get_inventory_runtime() -> InventoryRuntime:
 	return inventory_runtime
 
 
+func get_equipment_runtime() -> EquipmentRuntime:
+	return equipment_runtime
+
+
 func get_weapon_manager() -> WeaponManager:
 	return weapon_manager
+
+
+func get_attribute_system() -> AttributeSystem:
+	return attribute_system
+
+
+# ============================================
+# ATTRIBUTE HANDLERS
+# ============================================
+
+func _on_derived_stats_updated(stats: Dictionary) -> void:
+	# Update max health from endurance
+	max_health = stats.get("max_health", 100.0)
+
+	# Cap current health to new max
+	if health > max_health:
+		health = max_health
+
+	# Update movement controller with attribute multipliers
+	if movement_controller:
+		movement_controller.attribute_move_speed_mult = stats.get("move_speed_mult", 1.0)
+		movement_controller.attribute_sprint_speed_mult = stats.get("sprint_speed_mult", 1.0)
+		movement_controller.attribute_stamina_regen_mult = stats.get("stamina_regen_mult", 1.0)
+		movement_controller.max_stamina = stats.get("max_stamina", 100.0)
+
+	# Update combat controller with attribute multipliers
+	if combat_controller:
+		combat_controller.attribute_reload_speed_mult = stats.get("reload_speed_mult", 1.0)
+		combat_controller.attribute_ads_speed_mult = stats.get("ads_speed_mult", 1.0)
+		combat_controller.attribute_crit_chance = stats.get("crit_chance", 0.05)
+		combat_controller.attribute_crit_damage_mult = stats.get("crit_damage_mult", 1.5)
+
+
+func _on_level_up(new_level: int, attribute_points: int) -> void:
+	print("[Player] Leveled up to %d! (%d attribute points available)" % [new_level, attribute_points])
+	# TODO: Show level up UI/effects

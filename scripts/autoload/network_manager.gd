@@ -271,12 +271,15 @@ func _on_traversal_error(message: String) -> void:
 func _on_peer_connected(peer_id: int) -> void:
 	print("[Network] Peer connected: %d" % peer_id)
 
-	if is_authority():
-		_register_player(peer_id)
-		# Send FULL world snapshot for join-in-progress
-		_send_full_world_snapshot.rpc_id(peer_id, _serialize_full_world_state())
+	# NOTE: We do NOT register/spawn here anymore!
+	# Registration happens when client sends _request_registration RPC
+	# This ensures proper spawn claiming from backend happens first
+	# The full snapshot is sent AFTER registration completes
 
-		# Update traversal player count
+	if is_authority():
+		# Track connection for player count
+		if peer_id not in connected_peers:
+			connected_peers.append(peer_id)
 		TraversalClient.update_player_count(connected_peers.size())
 
 
@@ -371,6 +374,9 @@ func _register_player(peer_id: int, username: String = "") -> void:
 	if not is_authority():
 		return
 
+	# Prevent duplicate registration/spawn
+	var is_new := peer_id not in player_data
+
 	if username.is_empty():
 		username = "Player_%d" % peer_id
 
@@ -380,8 +386,11 @@ func _register_player(peer_id: int, username: String = "") -> void:
 	if peer_id not in connected_peers:
 		connected_peers.append(peer_id)
 
-	print("[Server] Registered player: %s (ID: %d)" % [username, peer_id])
-	player_joined.emit(peer_id)
+	print("[Server] Registered player: %s (ID: %d, new=%s)" % [username, peer_id, is_new])
+
+	# Only emit player_joined for new players (triggers spawn)
+	if is_new:
+		player_joined.emit(peer_id)
 
 
 func _unregister_player(peer_id: int) -> void:
@@ -534,6 +543,10 @@ func _request_registration(client_info: Dictionary) -> void:
 
 	_register_player(sender_id, player_name)
 	_confirm_registration.rpc_id(sender_id, sender_id, player_name)
+
+	# Send full world snapshot AFTER registration (player is now spawned)
+	# This ensures the new player sees all existing entities including themselves
+	_send_full_world_snapshot.rpc_id(sender_id, _serialize_full_world_state())
 
 
 ## Claim spawn assignment from backend (server-only)

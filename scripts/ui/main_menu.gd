@@ -52,8 +52,21 @@ var version_label: Label = null
 var player_id: String = ""
 var is_logged_in: bool = false
 
+# Menu manager (stash, loadout, traders, market)
+var menu_manager: MenuManager = null
+var current_loadout: Dictionary = {}
+
 
 func _ready() -> void:
+	# Check for dedicated server mode - skip UI and load game directly
+	if _is_dedicated_server():
+		print("[MainMenu] Dedicated server detected, loading game world...")
+		# Wait for HeadlessServer to start the network
+		# HeadlessServer handles server startup, we just load the scene
+		await get_tree().create_timer(0.5).timeout
+		get_tree().change_scene_to_file("res://scenes/game_world.tscn")
+		return
+
 	# Build the entire UI programmatically for full control
 	_create_background()
 	_create_main_menu()
@@ -548,7 +561,7 @@ func _on_stash_pressed() -> void:
 		status_label.add_theme_color_override("font_color", Color.ORANGE)
 		return
 
-	get_tree().change_scene_to_file("res://scenes/ui/stash_screen.tscn")
+	_open_menu_manager()
 
 
 func _on_settings_pressed() -> void:
@@ -766,3 +779,61 @@ func _enable_direct_buttons() -> void:
 func _load_game() -> void:
 	await get_tree().create_timer(0.5).timeout
 	get_tree().change_scene_to_file("res://scenes/game_world.tscn")
+
+
+## Check if running as dedicated server (headless mode)
+func _is_dedicated_server() -> bool:
+	var args := OS.get_cmdline_args()
+	for arg in args:
+		if arg == "--headless" or arg == "--server":
+			return true
+	return DisplayServer.get_name() == "headless"
+
+
+# ============================================
+# MENU MANAGER (Stash/Loadout/Traders/Market)
+# ============================================
+
+func _open_menu_manager() -> void:
+	# Hide main menu panels
+	if main_panel:
+		main_panel.visible = false
+	if play_panel:
+		play_panel.visible = false
+
+	# Create menu manager if doesn't exist
+	if not menu_manager:
+		var MenuManagerScript := preload("res://scripts/ui/menu_manager.gd")
+		menu_manager = MenuManagerScript.new()
+		menu_manager.set_anchors_preset(Control.PRESET_FULL_RECT)
+		menu_manager.ready_for_game.connect(_on_loadout_ready)
+		menu_manager.back_to_main_menu.connect(_on_menu_manager_closed)
+		add_child(menu_manager)
+
+	menu_manager.open()
+
+
+func _on_menu_manager_closed() -> void:
+	if menu_manager:
+		menu_manager.visible = false
+
+	# Show main menu again
+	_show_main_menu()
+
+
+func _on_loadout_ready(loadout: Dictionary) -> void:
+	current_loadout = loadout
+	print("[MainMenu] Loadout ready: %s" % loadout)
+
+	# Store loadout for when game starts
+	if menu_manager:
+		menu_manager.visible = false
+
+	status_label.text = "Loadout ready! Select a game mode to play"
+	status_label.add_theme_color_override("font_color", Color.GREEN)
+	_show_play_menu()
+
+
+## Get the current loadout for spawning
+func get_current_loadout() -> Dictionary:
+	return current_loadout

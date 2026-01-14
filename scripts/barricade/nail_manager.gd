@@ -82,7 +82,7 @@ func request_nail_placement(peer_id: int, data: Dictionary) -> Dictionary:
 		return result
 
 	# 5. Prop not being carried
-	if prop.is_carried:
+	if prop.is_held():
 		return result
 
 	# 6. Distance check (anti-teleport)
@@ -117,7 +117,7 @@ func request_nail_placement(peer_id: int, data: Dictionary) -> Dictionary:
 		if not is_instance_valid(surface_prop):
 			return result
 
-		if surface_prop.is_carried:
+		if surface_prop.is_held():
 			return result
 
 	# 12. Normal validation (prevent impossible angles)

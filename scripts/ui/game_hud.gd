@@ -17,6 +17,11 @@ var crosshair: Control = null
 # Team currency (EntityRegistry)
 var currency_label: Label = null
 
+# Sigil health display
+var sigil_container: Control = null
+var sigil_bar: ProgressBar = null
+var sigil_label: Label = null
+
 # Game Over UI (created dynamically)
 var game_over_panel: Panel = null
 var game_over_title: Label = null
@@ -38,6 +43,8 @@ func _ready() -> void:
 	GameState.player_spawned.connect(_on_player_spawned)
 	GameState.game_over.connect(_on_game_over)
 	GameState.extraction_available.connect(_on_extraction_available)
+	GameState.sigil_damaged.connect(_on_sigil_damaged)
+	GameState.sigil_corrupted.connect(_on_sigil_corrupted)
 
 	# Connect to EntityRegistry for currency updates
 	if EntityRegistry:
@@ -49,6 +56,7 @@ func _ready() -> void:
 	_create_weapon_hud()
 	_create_crosshair()
 	_create_currency_display()
+	_create_sigil_display()
 
 	# Initial state
 	_update_wave_display(0, 0)
@@ -513,3 +521,98 @@ func _on_entity_event(net_id: int, event: String, payload: Dictionary) -> void:
 	match event:
 		"looted", "item_purchased", "item_sold", "turret_spawned", "turret_refilled":
 			_update_currency_display()
+
+
+# ============================================
+# SIGIL HEALTH DISPLAY
+# ============================================
+
+func _create_sigil_display() -> void:
+	# Create container
+	sigil_container = Control.new()
+	sigil_container.name = "SigilHealth"
+	sigil_container.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	sigil_container.position = Vector2(20, 120)
+	sigil_container.custom_minimum_size = Vector2(200, 50)
+	add_child(sigil_container)
+
+	# Label
+	var label := Label.new()
+	label.text = "SIGIL"
+	label.add_theme_font_size_override("font_size", 14)
+	label.add_theme_color_override("font_color", Color(0.8, 0.6, 1.0))
+	sigil_container.add_child(label)
+
+	# Background panel
+	var bg := ColorRect.new()
+	bg.position = Vector2(0, 20)
+	bg.size = Vector2(200, 25)
+	bg.color = Color(0.1, 0.1, 0.1, 0.8)
+	sigil_container.add_child(bg)
+
+	# Progress bar
+	sigil_bar = ProgressBar.new()
+	sigil_bar.position = Vector2(5, 22)
+	sigil_bar.custom_minimum_size = Vector2(150, 20)
+	sigil_bar.max_value = 1000
+	sigil_bar.value = 1000
+	sigil_bar.show_percentage = false
+
+	# Style the bar
+	var fill_style := StyleBoxFlat.new()
+	fill_style.bg_color = Color(0.6, 0.3, 0.8)
+	fill_style.set_corner_radius_all(2)
+	sigil_bar.add_theme_stylebox_override("fill", fill_style)
+
+	var bg_style := StyleBoxFlat.new()
+	bg_style.bg_color = Color(0.15, 0.15, 0.15, 0.9)
+	bg_style.set_corner_radius_all(2)
+	sigil_bar.add_theme_stylebox_override("background", bg_style)
+
+	sigil_container.add_child(sigil_bar)
+
+	# Health text
+	sigil_label = Label.new()
+	sigil_label.position = Vector2(160, 20)
+	sigil_label.size = Vector2(40, 25)
+	sigil_label.text = "100%"
+	sigil_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	sigil_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	sigil_label.add_theme_font_size_override("font_size", 12)
+	sigil_container.add_child(sigil_label)
+
+
+func _on_sigil_damaged(damage: float, current_health: float, max_health: float) -> void:
+	if not sigil_bar or not sigil_label:
+		return
+
+	sigil_bar.max_value = max_health
+	sigil_bar.value = current_health
+
+	var percent := int((current_health / max_health) * 100) if max_health > 0 else 0
+	sigil_label.text = "%d%%" % percent
+
+	# Color based on health percentage
+	var fill_style := sigil_bar.get_theme_stylebox("fill") as StyleBoxFlat
+	if fill_style:
+		if percent <= 20:
+			fill_style.bg_color = Color(1.0, 0.2, 0.2)
+		elif percent <= 50:
+			fill_style.bg_color = Color(1.0, 0.6, 0.2)
+		else:
+			fill_style.bg_color = Color(0.6, 0.3, 0.8)
+
+
+func _on_sigil_corrupted(corruption_count: int) -> void:
+	# Flash the sigil bar red briefly
+	if sigil_bar:
+		var original_color := Color(0.6, 0.3, 0.8)
+		var fill_style := sigil_bar.get_theme_stylebox("fill") as StyleBoxFlat
+		if fill_style:
+			var flash_color := fill_style.bg_color
+			fill_style.bg_color = Color(1.5, 0.2, 0.2)
+
+			# Reset after brief flash
+			await get_tree().create_timer(0.15).timeout
+			if fill_style:
+				fill_style.bg_color = flash_color

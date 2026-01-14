@@ -299,14 +299,16 @@ func _swing_attack() -> void:
 	var result := space_state.intersect_ray(query)
 
 	if result:
-		# Send attack request
+		# Send melee attack request (NOT shoot - hammer is a tool)
 		var action_data := {
 			"origin": from,
 			"direction": -camera.global_basis.z,
 			"damage": nail_damage_on_miss,
+			"weapon": "hammer",
+			"hit_position": result.position,
 		}
 
-		NetworkManager.request_action.rpc_id(1, "shoot", action_data)
+		NetworkManager.request_action.rpc_id(1, "melee_attack", action_data)
 
 
 ## Add nails (from pickup, etc.)
