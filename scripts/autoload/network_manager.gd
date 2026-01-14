@@ -528,8 +528,9 @@ func _request_registration(client_info: Dictionary) -> void:
 		])
 
 		# Claim spawn from backend (server-authoritative)
+		# IMPORTANT: Wait for spawn claim before registering player
 		if lobby_id != "" and player_id != "":
-			_claim_spawn_async(sender_id, player_id, lobby_id)
+			await _claim_spawn_async(sender_id, player_id, lobby_id)
 
 	_register_player(sender_id, player_name)
 	_confirm_registration.rpc_id(sender_id, sender_id, player_name)

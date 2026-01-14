@@ -1,16 +1,26 @@
 extends Node3D
 ## GameWorld - Main game scene controller
 ##
-## Initializes the game world, spawns players, manages waves.
-## Supports group spawning (teams spawn together) and solo spawning.
+## Implements the "pressure tube" model:
+## - Sigil at start (defense objective)
+## - Zombies spawn at end, move toward sigil
+## - Barricades block the hallway
+## - Players defend with props, loot, and skills
 
 # Node references
 @onready var players_container: Node = $Players
 @onready var zombies_container: Node = $Zombies
 @onready var props_container: Node = $Props
 @onready var spawn_points: Node = $SpawnPoints
-@onready var wave_manager: WaveManager = $WaveManager
-@onready var hud: Control = $HUD
+@onready var wave_manager: WaveManager = $WaveManager if has_node("WaveManager") else null
+@onready var hud: Control = $HUD if has_node("HUD") else null
+
+# Sigil (defense objective)
+var sigil: Sigil = null
+var sigil_position := Vector3.ZERO
+
+# Zombie spawn lane
+var zombie_spawn_position := Vector3(0, 0, 50)  # End of hallway
 
 # Spawn point system
 # Group spawners: Named groups that spawn together (e.g., "alpha", "bravo")
@@ -30,10 +40,21 @@ func _ready() -> void:
 	# Collect spawn points
 	_collect_spawn_points()
 
+	# Find or create sigil
+	_setup_sigil()
+
+	# Find zombie spawn lane
+	_setup_spawn_lane()
+
 	# Connect signals
 	NetworkManager.player_joined.connect(_on_player_joined)
 	NetworkManager.player_left.connect(_on_player_left)
-	GameState.zombie_killed.connect(wave_manager.on_zombie_killed)
+
+	# Connect to GameDirector (new system) or WaveManager (legacy)
+	if GameDirector:
+		GameState.zombie_killed.connect(GameDirector.on_zombie_killed)
+	elif wave_manager:
+		GameState.zombie_killed.connect(wave_manager.on_zombie_killed)
 
 	# Spawn existing players (for late joiners)
 	for peer_id in NetworkManager.connected_peers:
@@ -42,6 +63,59 @@ func _ready() -> void:
 	# Start waves on server after delay
 	if NetworkManager.is_authority():
 		await get_tree().create_timer(3.0).timeout
+		_start_game()
+
+
+func _setup_sigil() -> void:
+	# Look for existing sigil in scene
+	var sigils := get_tree().get_nodes_in_group("sigil")
+	if not sigils.is_empty():
+		sigil = sigils[0] as Sigil
+		sigil_position = sigil.global_position
+		print("[GameWorld] Found sigil at %s" % sigil_position)
+	else:
+		# Look for sigil spawn point
+		if spawn_points:
+			var sigil_point := spawn_points.get_node_or_null("SigilSpawn")
+			if sigil_point:
+				sigil_position = sigil_point.global_position
+			else:
+				sigil_position = Vector3(0, 0, 0)
+
+		# Create sigil dynamically if script exists
+		var sigil_script := load("res://scripts/world/sigil.gd")
+		if sigil_script:
+			sigil = Sigil.new()
+			sigil.global_position = sigil_position
+			add_child(sigil)
+			print("[GameWorld] Created sigil at %s" % sigil_position)
+
+
+func _setup_spawn_lane() -> void:
+	# Look for zombie spawn point
+	if spawn_points:
+		var zombie_spawn := spawn_points.get_node_or_null("ZombieSpawn")
+		if zombie_spawn:
+			zombie_spawn_position = zombie_spawn.global_position
+		else:
+			# Look for zombie_spawns group
+			var spawns := get_tree().get_nodes_in_group("zombie_spawns")
+			if not spawns.is_empty():
+				zombie_spawn_position = spawns[0].global_position
+
+	# Configure GameDirector spawn lane
+	if GameDirector:
+		GameDirector.set_spawn_lane(zombie_spawn_position, sigil_position)
+
+	print("[GameWorld] Spawn lane: Zombies at %s -> Sigil at %s" % [
+		zombie_spawn_position, sigil_position
+	])
+
+
+func _start_game() -> void:
+	if GameDirector:
+		GameDirector.start_game()
+	elif wave_manager:
 		wave_manager.start_waves()
 
 
