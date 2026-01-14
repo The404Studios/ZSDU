@@ -58,6 +58,10 @@ func _ready() -> void:
 	_update_timer.timeout.connect(_poll_lobby_updates)
 	add_child(_update_timer)
 
+	# Connect to network signals for error handling
+	NetworkManager.connection_failed.connect(_on_connection_failed)
+	NetworkManager.client_disconnected.connect(_on_disconnected)
+
 
 # ============================================
 # PUBLIC API - LOBBY MANAGEMENT
@@ -395,3 +399,26 @@ func set_spawn_assignment(group: String, index: int) -> void:
 ## Get current lobby ID (for sending to server on connect)
 func get_lobby_id() -> String:
 	return current_lobby.get("id", "")
+
+
+# ============================================
+# CONNECTION ERROR HANDLING
+# ============================================
+
+func _on_connection_failed() -> void:
+	if current_state == LobbyState.IN_GAME or current_state == LobbyState.STARTING:
+		print("[Lobby] Connection to game server failed!")
+		lobby_error.emit("Failed to connect to game server")
+
+		# Return to lobby state so player can try again
+		current_state = LobbyState.IN_LOBBY
+		_update_timer.start()
+
+
+func _on_disconnected() -> void:
+	if current_state == LobbyState.IN_GAME:
+		print("[Lobby] Disconnected from game server")
+		lobby_error.emit("Disconnected from game server")
+
+		# Cleanup lobby state
+		_cleanup_lobby()

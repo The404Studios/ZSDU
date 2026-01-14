@@ -55,11 +55,15 @@ var state_timer: float = 0.0
 var target_player: Node3D = null
 var target_nail_id: int = -1
 var target_position := Vector3.ZERO
+var target_direction := Vector3.FORWARD  # Direction toward sigil
 
-# Navigation
+# Navigation (simplified - mostly moves toward sigil)
 var nav_agent: NavigationAgent3D = null
 var path_update_timer: float = 0.0
 const PATH_UPDATE_INTERVAL := 0.5  # Don't re-path every frame
+
+# Pressure tube mode - zombies just move forward
+var use_directional_movement := true  # Enable simplified movement
 
 # Attack state
 var attack_timer: float = 0.0
@@ -165,21 +169,46 @@ func apply_wave_scaling(wave: int) -> void:
 	damage *= damage_mult
 
 
+## Set target position (sigil location) for directional movement
+func set_target_position(pos: Vector3) -> void:
+	target_position = pos
+	# Calculate direction to target
+	var direction := pos - global_position
+	direction.y = 0
+	if direction.length() > 0.1:
+		target_direction = direction.normalized()
+	_change_state(ZombieState.PATH)
+
+
 # ============================================
 # STATE MACHINE
 # ============================================
 
 ## IDLE - Look for targets
-func _state_idle(delta: float) -> void:
+func _state_idle(_delta: float) -> void:
 	# Find nearest player
 	_find_target()
 
 	if target_player:
 		_change_state(ZombieState.AGGRO)
-	elif state_timer > 2.0:
-		# Wander randomly
-		var random_dir := Vector3(randf_range(-1, 1), 0, randf_range(-1, 1)).normalized()
-		target_position = global_position + random_dir * 5.0
+		return
+
+	# Check for nearby barricades to attack even without a player target
+	var nearby_nail := GameState.get_nearest_nail(global_position, 10.0)
+	if nearby_nail >= 0:
+		target_nail_id = nearby_nail
+		var nail: Dictionary = GameState.nails[nearby_nail]
+		target_position = nail.get("position", global_position)
+		_change_state(ZombieState.PATH)
+		return
+
+	# Wander after short delay
+	if state_timer > 1.0:
+		# Wander randomly towards map center (where players/barricades likely are)
+		var to_center := -global_position.normalized()
+		var random_offset := Vector3(randf_range(-0.5, 0.5), 0, randf_range(-0.5, 0.5))
+		var direction := (to_center + random_offset).normalized()
+		target_position = global_position + direction * 10.0
 		_change_state(ZombieState.PATH)
 
 
@@ -193,46 +222,58 @@ func _state_aggro(_delta: float) -> void:
 	_change_state(ZombieState.PATH)
 
 
-## PATH - Navigate to target
+## PATH - Move toward target (simplified directional movement)
 func _state_path(delta: float) -> void:
-	if not nav_agent:
-		_change_state(ZombieState.IDLE)
+	# Always check for nearby nails (barricade detection)
+	var nearby_nail := GameState.get_nearest_nail(global_position, 2.5)
+	if nearby_nail >= 0:
+		target_nail_id = nearby_nail
+		_change_state(ZombieState.ATTACK_NAIL)
 		return
 
-	# Update path periodically (not every frame)
+	# Check for blocking barricades via raycast (less frequently)
 	if path_update_timer >= PATH_UPDATE_INTERVAL:
 		path_update_timer = 0.0
 
-		# Check for blocking barricades
 		var nail_id := _check_for_blocking_nail()
 		if nail_id >= 0:
 			target_nail_id = nail_id
 			_change_state(ZombieState.ATTACK_NAIL)
 			return
 
-		# Update target if we have a player
-		if is_instance_valid(target_player):
-			target_position = target_player.global_position
-
-		nav_agent.target_position = target_position
-
-	# Check if we reached target
-	if nav_agent.is_navigation_finished():
-		if is_instance_valid(target_player):
-			var dist := global_position.distance_to(target_player.global_position)
-			if dist < 2.0:
-				_change_state(ZombieState.ATTACK_PLAYER)
-			else:
+		# Check if player is nearby and closer than sigil
+		_find_target()
+		if target_player:
+			var player_dist := global_position.distance_to(target_player.global_position)
+			if player_dist < 5.0:
 				_change_state(ZombieState.AGGRO)
-		else:
-			_change_state(ZombieState.IDLE)
-		return
+				return
 
-	# Move towards next path point
-	var next_pos := nav_agent.get_next_path_position()
-	var direction := global_position.direction_to(next_pos)
-	direction.y = 0
-	direction = direction.normalized()
+	# Use directional movement (pressure tube model)
+	var direction: Vector3
+	if use_directional_movement:
+		# Just move toward target (sigil)
+		direction = global_position.direction_to(target_position)
+		direction.y = 0
+		direction = direction.normalized()
+	else:
+		# Use navmesh if available
+		if nav_agent:
+			nav_agent.target_position = target_position
+			var next_pos := nav_agent.get_next_path_position()
+			direction = global_position.direction_to(next_pos)
+			direction.y = 0
+			direction = direction.normalized()
+		else:
+			direction = target_direction
+
+	# Check if reached target (sigil area)
+	var dist_to_target := global_position.distance_to(target_position)
+	if dist_to_target < 2.0:
+		# Reached sigil - handled by sigil's area trigger
+		velocity.x = 0
+		velocity.z = 0
+		return
 
 	# Apply group offset if following leader
 	if group_leader and is_instance_valid(group_leader):
@@ -323,7 +364,12 @@ func _state_stagger(delta: float) -> void:
 
 	stagger_duration -= delta
 	if stagger_duration <= 0:
-		_change_state(ZombieState.AGGRO)
+		# Re-validate target after stagger ends
+		_find_target()
+		if target_player:
+			_change_state(ZombieState.AGGRO)
+		else:
+			_change_state(ZombieState.IDLE)
 
 
 # ============================================
@@ -361,27 +407,32 @@ func _find_target() -> void:
 
 ## Check for blocking nail along path
 func _check_for_blocking_nail() -> int:
-	# Raycast forward to check for barricades
 	var space_state := get_world_3d().direct_space_state
 	var from := global_position + Vector3.UP * 0.5
-	var to := from + -global_basis.z * 3.0
+	var forward := -global_basis.z
 
-	var query := PhysicsRayQueryParameters3D.create(from, to)
-	query.collision_mask = 0b00001000  # Props layer
+	# Check multiple angles for better detection
+	var angles := [0.0, -0.3, 0.3]  # Center, left, right
+	for angle_offset in angles:
+		var direction := forward.rotated(Vector3.UP, angle_offset)
+		var to := from + direction * 4.0  # Increased range
 
-	var result := space_state.intersect_ray(query)
+		var query := PhysicsRayQueryParameters3D.create(from, to)
+		query.collision_mask = 0b00001000  # Props layer
 
-	if result:
-		# Found a prop, check if it has nails
-		var prop: Node = result.collider
-		var prop_id: int = prop.get("prop_id") if prop else -1
+		var result := space_state.intersect_ray(query)
 
-		if prop_id >= 0 and GameState and GameState.nails:
-			# Find a nail connected to this prop
-			for nail_id in GameState.nails:
-				var nail: Dictionary = GameState.nails[nail_id]
-				if nail.get("active", false) and nail.get("prop_id", -1) == prop_id:
-					return nail_id
+		if result:
+			# Found a prop, check if it has nails
+			var prop: Node = result.collider
+			var prop_id: int = prop.get("prop_id") if prop else -1
+
+			if prop_id >= 0 and GameState and GameState.nails:
+				# Find a nail connected to this prop
+				for nail_id in GameState.nails:
+					var nail: Dictionary = GameState.nails[nail_id]
+					if nail.get("active", false) and nail.get("prop_id", -1) == prop_id:
+						return nail_id
 
 	# Also check for nearby nails directly
 	var nearest_nail := GameState.get_nearest_nail(global_position, 2.0)
