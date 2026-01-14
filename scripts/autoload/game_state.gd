@@ -57,6 +57,11 @@ var _next_zombie_id: int = 1
 var _next_prop_id: int = 1
 var _next_nail_id: int = 1
 
+# Network throttling (send updates at ~20 tick/s instead of 60)
+const NETWORK_TICK_RATE := 20  # Updates per second
+var _network_tick_counter: int = 0
+var _physics_ticks_per_network_tick: int = 3  # 60/20 = 3
+
 # References
 var world_node: Node3D = null
 var players_container: Node = null
@@ -88,11 +93,15 @@ func _physics_process(_delta: float) -> void:
 
 ## Server tick - runs every physics frame on server
 func _server_tick() -> void:
-	# Build and broadcast state snapshot
-	var snapshot := _build_snapshot()
-	NetworkManager.broadcast_state_update.rpc(snapshot)
+	# Throttle network updates (60 fps physics -> 20 fps network)
+	_network_tick_counter += 1
+	if _network_tick_counter >= _physics_ticks_per_network_tick:
+		_network_tick_counter = 0
+		# Build and broadcast state snapshot
+		var snapshot := _build_snapshot()
+		NetworkManager.broadcast_state_update.rpc(snapshot)
 
-	# Process entity AI (turrets)
+	# Process entity AI (turrets) - every frame for smooth movement
 	if EntityRegistry:
 		EntityRegistry.process_turrets(get_physics_process_delta_time())
 
