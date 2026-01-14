@@ -60,9 +60,18 @@ func _ready() -> void:
 	# Add to groups
 	add_to_group("props")
 
-	# Register with GameState on server
+	# Generate deterministic ID from node path for scene-placed props
+	# This ensures server and client have matching IDs
+	if prop_id == 0:
+		prop_id = get_path().hash() & 0x7FFFFFFF  # Positive 31-bit hash
+
+	# Register with GameState
 	if NetworkManager.is_authority():
-		prop_id = GameState.register_prop_with_state(self, "")
+		# Server registers with the deterministic ID
+		GameState.register_prop_with_id(self, prop_id, "")
+	else:
+		# Client registers to apply pending snapshot state
+		GameState.register_prop_client(self, prop_id)
 
 
 func _physics_process(delta: float) -> void:

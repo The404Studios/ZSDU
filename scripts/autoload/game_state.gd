@@ -46,6 +46,10 @@ var zombies: Dictionary = {}  # zombie_id -> Zombie node
 var props: Dictionary = {}    # prop_id -> Prop node
 var nails: Dictionary = {}    # nail_id -> Nail data
 
+# Pending state for late joiners (client-side)
+# When snapshot arrives before entity exists, store state here
+var _pending_prop_state: Dictionary = {}  # prop_id -> state dict
+
 # ID counters (server-side)
 var _next_zombie_id: int = 1
 var _next_prop_id: int = 1
@@ -329,6 +333,10 @@ func initialize_world(world: Node3D) -> void:
 func spawn_player(peer_id: int, position: Vector3 = Vector3.ZERO) -> Node3D:
 	if not NetworkManager.is_authority():
 		return null
+
+	# Prevent duplicate spawns
+	if peer_id in players:
+		return players[peer_id]
 
 	if not player_scene:
 		push_error("Player scene not loaded")
@@ -1496,6 +1504,11 @@ func apply_full_snapshot(state: Dictionary) -> void:
 					prop.sleeping = prop_data.get("sleeping", false)
 					prop.linear_velocity = prop_data.get("linear_velocity", Vector3.ZERO)
 					prop.angular_velocity = prop_data.get("angular_velocity", Vector3.ZERO)
+			else:
+				# Prop doesn't exist yet - store pending state
+				# Will be applied when prop registers itself
+				_pending_prop_state[prop_id] = prop_data
+				print("[GameState] Stored pending state for prop %d" % prop_id)
 
 	# Reconstruct nails with joints
 	if "nails" in state:
@@ -1552,6 +1565,7 @@ var _prop_registry: Dictionary = {}  # prop_id -> { scene_path, original_positio
 
 
 ## Register a prop with its original state (server-side, called at world init)
+## Use register_prop_with_id for scene-placed props with deterministic IDs
 func register_prop_with_state(prop: RigidBody3D, scene_path: String = "") -> int:
 	var prop_id := _next_prop_id
 	_next_prop_id += 1
@@ -1568,6 +1582,53 @@ func register_prop_with_state(prop: RigidBody3D, scene_path: String = "") -> int
 	}
 
 	return prop_id
+
+
+## Register a prop with a specific ID (server-side, for scene-placed props with deterministic IDs)
+func register_prop_with_id(prop: RigidBody3D, prop_id: int, scene_path: String = "") -> void:
+	if not NetworkManager.is_authority():
+		return
+
+	prop.set("prop_id", prop_id)
+	props[prop_id] = prop
+
+	# Update next_prop_id to avoid collisions with dynamically spawned props
+	_next_prop_id = maxi(_next_prop_id, prop_id + 1)
+
+	# Store original state for reset
+	_prop_registry[prop_id] = {
+		"scene_path": scene_path,
+		"original_position": prop.global_position,
+		"original_rotation": prop.rotation,
+		"original_mass": prop.mass,
+	}
+
+
+## Register a prop on client-side and apply any pending state from late-join snapshot
+func register_prop_client(prop: RigidBody3D, prop_id: int) -> void:
+	if NetworkManager.is_authority():
+		return  # Server uses register_prop_with_state instead
+
+	prop.set("prop_id", prop_id)
+	props[prop_id] = prop
+
+	# Check for pending state from late-join snapshot
+	if prop_id in _pending_prop_state:
+		var pending: Dictionary = _pending_prop_state[prop_id]
+		print("[GameState] Applying pending state to prop %d" % prop_id)
+
+		prop.global_position = pending.get("position", prop.global_position)
+		prop.rotation = pending.get("rotation", prop.rotation)
+		prop.sleeping = pending.get("sleeping", false)
+		prop.linear_velocity = pending.get("linear_velocity", Vector3.ZERO)
+		prop.angular_velocity = pending.get("angular_velocity", Vector3.ZERO)
+
+		# Apply mode/holder state if prop supports it
+		if prop.has_method("apply_network_state"):
+			prop.apply_network_state(pending)
+
+		_pending_prop_state.erase(prop_id)
+		print("[GameState] Prop %d state applied, %d pending remaining" % [prop_id, _pending_prop_state.size()])
 
 
 ## Get prop's original state
