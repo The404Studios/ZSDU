@@ -1,19 +1,32 @@
 extends Control
 class_name StashGrid
-## StashGrid - Grid-based inventory container (Tarkov-style)
+## StashGrid - Tarkov-style grid inventory container
 ##
-## Displays items on a grid with drag-and-drop functionality.
-## Communicates with EconomyService for backend operations.
+## Features:
+## - Beautiful cell-based grid with hover effects
+## - Smooth drag and drop with animated previews
+## - Cell highlighting during drag operations
+## - Visual feedback for valid/invalid placements
 
 signal item_selected(item: StashItem)
 signal item_context_menu(item: StashItem, position: Vector2)
+signal item_hovered_changed(item: StashItem)
 signal operation_complete(success: bool, message: String)
 
 const CELL_SIZE := 64
-const GRID_COLOR := Color(0.2, 0.2, 0.2, 0.5)
-const GRID_LINE_COLOR := Color(0.3, 0.3, 0.3)
-const VALID_DROP_COLOR := Color(0.2, 0.5, 0.2, 0.5)
-const INVALID_DROP_COLOR := Color(0.5, 0.2, 0.2, 0.5)
+
+# Visual constants
+const BG_COLOR := Color(0.08, 0.08, 0.1, 1.0)
+const CELL_BG_COLOR := Color(0.11, 0.11, 0.13, 1.0)
+const CELL_BG_ALT_COLOR := Color(0.10, 0.10, 0.12, 1.0)
+const GRID_LINE_COLOR := Color(0.18, 0.18, 0.2, 1.0)
+const GRID_LINE_MAJOR_COLOR := Color(0.22, 0.22, 0.25, 1.0)
+const CELL_HOVER_COLOR := Color(0.2, 0.2, 0.25, 0.5)
+
+const VALID_DROP_COLOR := Color(0.15, 0.5, 0.2, 0.4)
+const VALID_DROP_BORDER := Color(0.3, 0.8, 0.4, 0.8)
+const INVALID_DROP_COLOR := Color(0.5, 0.15, 0.15, 0.4)
+const INVALID_DROP_BORDER := Color(0.9, 0.3, 0.3, 0.8)
 
 var grid_width: int = 10
 var grid_height: int = 40
@@ -28,53 +41,204 @@ var drag_valid := false
 var drop_target_x := -1
 var drop_target_y := -1
 
-# Scene for items
-var stash_item_script: GDScript = preload("res://scripts/ui/stash/stash_item.gd")
+# Hover state
+var hover_cell_x := -1
+var hover_cell_y := -1
+var hovered_item: StashItem = null
+
+# Animation
+var drop_preview_alpha := 0.0
+var _preview_tween: Tween = null
 
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
+	mouse_exited.connect(_on_mouse_exited)
 	EconomyService.stash_updated.connect(_on_stash_updated)
 
 
+func _process(delta: float) -> void:
+	# Animate drop preview
+	var target_alpha := 1.0 if dragging_item else 0.0
+	var old_alpha := drop_preview_alpha
+	drop_preview_alpha = lerpf(drop_preview_alpha, target_alpha, delta * 10.0)
+
+	if abs(old_alpha - drop_preview_alpha) > 0.01:
+		queue_redraw()
+
+
 func _draw() -> void:
-	# Draw grid background
-	var grid_rect := Rect2(Vector2.ZERO, Vector2(grid_width * CELL_SIZE, grid_height * CELL_SIZE))
-	draw_rect(grid_rect, GRID_COLOR, true)
+	var total_size := Vector2(grid_width * CELL_SIZE, grid_height * CELL_SIZE)
+
+	# Background
+	draw_rect(Rect2(Vector2.ZERO, total_size), BG_COLOR, true)
+
+	# Draw cells with alternating pattern
+	for x in range(grid_width):
+		for y in range(grid_height):
+			var cell_rect := Rect2(Vector2(x * CELL_SIZE, y * CELL_SIZE), Vector2(CELL_SIZE, CELL_SIZE))
+			var is_alt := (x + y) % 2 == 1
+			var cell_color := CELL_BG_ALT_COLOR if is_alt else CELL_BG_COLOR
+
+			# Highlight hovered cell
+			if x == hover_cell_x and y == hover_cell_y and not dragging_item:
+				cell_color = cell_color.lerp(CELL_HOVER_COLOR, 0.5)
+
+			draw_rect(cell_rect, cell_color, true)
 
 	# Draw grid lines
-	for x in range(grid_width + 1):
-		draw_line(
-			Vector2(x * CELL_SIZE, 0),
-			Vector2(x * CELL_SIZE, grid_height * CELL_SIZE),
-			GRID_LINE_COLOR, 1.0
-		)
-
-	for y in range(grid_height + 1):
-		draw_line(
-			Vector2(0, y * CELL_SIZE),
-			Vector2(grid_width * CELL_SIZE, y * CELL_SIZE),
-			GRID_LINE_COLOR, 1.0
-		)
+	_draw_grid_lines()
 
 	# Draw drop preview if dragging
-	if dragging_item and drop_target_x >= 0 and drop_target_y >= 0:
-		var preview_rect := Rect2(
-			Vector2(drop_target_x * CELL_SIZE, drop_target_y * CELL_SIZE),
-			Vector2(dragging_item.get_grid_width() * CELL_SIZE, dragging_item.get_grid_height() * CELL_SIZE)
-		)
-		var preview_color := VALID_DROP_COLOR if drag_valid else INVALID_DROP_COLOR
-		draw_rect(preview_rect, preview_color, true)
+	if dragging_item and drop_target_x >= 0 and drop_target_y >= 0 and drop_preview_alpha > 0.01:
+		_draw_drop_preview()
+
+	# Draw border
+	draw_rect(Rect2(Vector2.ZERO, total_size), Color(0.25, 0.25, 0.28), false, 2.0)
+
+	# Draw corner accents
+	_draw_corner_accents(Rect2(Vector2.ZERO, total_size))
+
+
+func _draw_grid_lines() -> void:
+	var total_height := grid_height * CELL_SIZE
+	var total_width := grid_width * CELL_SIZE
+
+	# Vertical lines
+	for x in range(grid_width + 1):
+		var is_major := x % 5 == 0
+		var color := GRID_LINE_MAJOR_COLOR if is_major else GRID_LINE_COLOR
+		var width := 1.5 if is_major else 1.0
+		draw_line(Vector2(x * CELL_SIZE, 0), Vector2(x * CELL_SIZE, total_height), color, width)
+
+	# Horizontal lines
+	for y in range(grid_height + 1):
+		var is_major := y % 5 == 0
+		var color := GRID_LINE_MAJOR_COLOR if is_major else GRID_LINE_COLOR
+		var width := 1.5 if is_major else 1.0
+		draw_line(Vector2(0, y * CELL_SIZE), Vector2(total_width, y * CELL_SIZE), color, width)
+
+
+func _draw_drop_preview() -> void:
+	var preview_pos := Vector2(drop_target_x * CELL_SIZE, drop_target_y * CELL_SIZE)
+	var preview_size := Vector2(
+		dragging_item.get_grid_width() * CELL_SIZE,
+		dragging_item.get_grid_height() * CELL_SIZE
+	)
+	var preview_rect := Rect2(preview_pos, preview_size)
+
+	var fill_color: Color
+	var border_color: Color
+	if drag_valid:
+		fill_color = VALID_DROP_COLOR
+		border_color = VALID_DROP_BORDER
+	else:
+		fill_color = INVALID_DROP_COLOR
+		border_color = INVALID_DROP_BORDER
+
+	# Apply animation alpha
+	fill_color.a *= drop_preview_alpha
+	border_color.a *= drop_preview_alpha
+
+	# Draw filled preview
+	draw_rect(preview_rect, fill_color, true)
+
+	# Draw animated dashed border
+	var dash_length := 8.0
+	var gap_length := 4.0
+	var time_offset := fmod(Time.get_ticks_msec() / 200.0, dash_length + gap_length)
+
+	_draw_dashed_rect(preview_rect, border_color, 2.0, dash_length, gap_length, time_offset)
+
+	# Draw cell highlights within preview
+	for dx in range(dragging_item.get_grid_width()):
+		for dy in range(dragging_item.get_grid_height()):
+			var cell_pos := preview_pos + Vector2(dx * CELL_SIZE, dy * CELL_SIZE)
+			var cell_rect := Rect2(cell_pos + Vector2(2, 2), Vector2(CELL_SIZE - 4, CELL_SIZE - 4))
+			var cell_highlight := fill_color
+			cell_highlight.a *= 0.3
+			draw_rect(cell_rect, cell_highlight, true)
+
+
+func _draw_dashed_rect(rect: Rect2, color: Color, width: float, dash: float, gap: float, offset: float) -> void:
+	var points := [
+		rect.position,
+		Vector2(rect.end.x, rect.position.y),
+		rect.end,
+		Vector2(rect.position.x, rect.end.y),
+		rect.position
+	]
+
+	for i in range(4):
+		_draw_dashed_line(points[i], points[i + 1], color, width, dash, gap, offset)
+
+
+func _draw_dashed_line(from: Vector2, to: Vector2, color: Color, width: float, dash: float, gap: float, offset: float) -> void:
+	var length := from.distance_to(to)
+	var direction := (to - from).normalized()
+	var pattern_length := dash + gap
+
+	var pos := offset
+	while pos < length:
+		var start := from + direction * pos
+		var end := from + direction * minf(pos + dash, length)
+		draw_line(start, end, color, width)
+		pos += pattern_length
+
+
+func _draw_corner_accents(rect: Rect2) -> void:
+	var accent_length := 12.0
+	var accent_color := Color(0.35, 0.35, 0.4)
+
+	# Top-left
+	draw_line(rect.position, rect.position + Vector2(accent_length, 0), accent_color, 2.0)
+	draw_line(rect.position, rect.position + Vector2(0, accent_length), accent_color, 2.0)
+
+	# Top-right
+	var tr := Vector2(rect.end.x, rect.position.y)
+	draw_line(tr, tr - Vector2(accent_length, 0), accent_color, 2.0)
+	draw_line(tr, tr + Vector2(0, accent_length), accent_color, 2.0)
+
+	# Bottom-left
+	var bl := Vector2(rect.position.x, rect.end.y)
+	draw_line(bl, bl + Vector2(accent_length, 0), accent_color, 2.0)
+	draw_line(bl, bl - Vector2(0, accent_length), accent_color, 2.0)
+
+	# Bottom-right
+	draw_line(rect.end, rect.end - Vector2(accent_length, 0), accent_color, 2.0)
+	draw_line(rect.end, rect.end - Vector2(0, accent_length), accent_color, 2.0)
 
 
 func _gui_input(event: InputEvent) -> void:
-	if event is InputEventMouseMotion and dragging_item:
-		_update_drop_preview(event.position)
+	if event is InputEventMouseMotion:
+		_update_hover(event.position)
+		if dragging_item:
+			_update_drop_preview(event.position)
 
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
 			if dragging_item:
 				_attempt_drop()
+
+
+func _update_hover(pos: Vector2) -> void:
+	var new_x := int(pos.x / CELL_SIZE)
+	var new_y := int(pos.y / CELL_SIZE)
+
+	# Clamp to grid
+	new_x = clampi(new_x, 0, grid_width - 1)
+	new_y = clampi(new_y, 0, grid_height - 1)
+
+	if new_x != hover_cell_x or new_y != hover_cell_y:
+		hover_cell_x = new_x
+		hover_cell_y = new_y
+		queue_redraw()
+
+
+func _on_mouse_exited() -> void:
+	hover_cell_x = -1
+	hover_cell_y = -1
+	queue_redraw()
 
 
 func setup(width: int, height: int) -> void:
@@ -86,7 +250,7 @@ func setup(width: int, height: int) -> void:
 
 
 func refresh() -> void:
-	# Clear existing items
+	# Clear existing items with fade out animation
 	for child in get_children():
 		if child is StashItem:
 			child.queue_free()
@@ -97,6 +261,8 @@ func refresh() -> void:
 	# Get data from EconomyService
 	var stash_placements: Array = EconomyService.get_placements()
 
+	# Create items with staggered animation
+	var delay := 0.0
 	for placement in stash_placements:
 		var iid: String = placement.get("iid", "")
 		var x: int = placement.get("x", 0)
@@ -110,9 +276,20 @@ func refresh() -> void:
 		var def_id: String = item_data.get("def_id", item_data.get("defId", ""))
 		var item_def: Dictionary = EconomyService.get_item_def(def_id)
 		if item_def.is_empty():
-			item_def = { "name": def_id, "w": 1, "h": 1 }
+			item_def = { "name": def_id, "w": 1, "h": 1, "rarity": "common" }
 
-		_create_item(iid, item_data, item_def, x, y, rot)
+		var item := _create_item(iid, item_data, item_def, x, y, rot)
+
+		# Animate item appearing
+		item.modulate.a = 0.0
+		item.scale = Vector2(0.8, 0.8)
+
+		var tween := create_tween()
+		tween.set_parallel(true)
+		tween.tween_property(item, "modulate:a", 1.0, 0.2).set_delay(delay)
+		tween.tween_property(item, "scale", Vector2.ONE, 0.25).set_delay(delay).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+
+		delay += 0.02  # Stagger
 
 	queue_redraw()
 
@@ -129,6 +306,8 @@ func _create_item(iid: String, item_data: Dictionary, item_def: Dictionary, x: i
 	# Connect signals
 	item.item_clicked.connect(_on_item_clicked)
 	item.item_right_clicked.connect(_on_item_right_clicked)
+	item.item_hovered.connect(_on_item_hovered)
+	item.item_unhovered.connect(_on_item_unhovered)
 	item.drag_started.connect(_on_item_drag_started)
 	item.drag_ended.connect(_on_item_drag_ended)
 
@@ -169,17 +348,15 @@ func _update_drop_preview(mouse_pos: Vector2) -> void:
 	if not dragging_item:
 		return
 
-	# Calculate target grid position
-	var target_x := int(mouse_pos.x / CELL_SIZE)
-	var target_y := int(mouse_pos.y / CELL_SIZE)
-
-	# Center on item
-	target_x -= dragging_item.get_grid_width() / 2
-	target_y -= dragging_item.get_grid_height() / 2
+	# Calculate target grid position (centered on cursor)
+	var target_x := int(mouse_pos.x / CELL_SIZE) - dragging_item.get_grid_width() / 2
+	var target_y := int(mouse_pos.y / CELL_SIZE) - dragging_item.get_grid_height() / 2
 
 	# Clamp to grid bounds
 	target_x = clampi(target_x, 0, grid_width - dragging_item.get_grid_width())
 	target_y = clampi(target_y, 0, grid_height - dragging_item.get_grid_height())
+
+	var changed := target_x != drop_target_x or target_y != drop_target_y
 
 	drop_target_x = target_x
 	drop_target_y = target_y
@@ -192,7 +369,8 @@ func _update_drop_preview(mouse_pos: Vector2) -> void:
 		dragging_item.iid
 	)
 
-	queue_redraw()
+	if changed:
+		queue_redraw()
 
 
 func _attempt_drop() -> void:
@@ -210,33 +388,31 @@ func _attempt_drop() -> void:
 		_clear_drag_state()
 		return
 
-	# Request move from backend
+	# Store old state for potential rollback
 	var iid := dragging_item.iid
 	var old_x := dragging_item.grid_x
 	var old_y := dragging_item.grid_y
 	var old_w := dragging_item.get_grid_width()
 	var old_h := dragging_item.get_grid_height()
+	var new_x := drop_target_x
+	var new_y := drop_target_y
 
-	# Optimistically update UI
+	# Optimistically update UI with animation
 	_unregister_placement(iid, old_x, old_y, old_w, old_h)
-	dragging_item.grid_x = drop_target_x
-	dragging_item.grid_y = drop_target_y
-	dragging_item.position = Vector2(drop_target_x * CELL_SIZE, drop_target_y * CELL_SIZE)
-	_register_placement(iid, drop_target_x, drop_target_y, old_w, old_h)
+	dragging_item.animate_to_position(new_x, new_y)
+	_register_placement(iid, new_x, new_y, old_w, old_h)
 
 	_clear_drag_state()
 
 	# Send to backend
-	var success := await EconomyService.move_item(iid, drop_target_x, drop_target_y, dragging_item.item_rotation)
+	var success := await EconomyService.move_item(iid, new_x, new_y, dragging_item.item_rotation)
 
 	if not success:
-		# Revert on failure
+		# Revert on failure with animation
 		if iid in items:
 			var item: StashItem = items[iid]
 			_unregister_placement(iid, item.grid_x, item.grid_y, item.get_grid_width(), item.get_grid_height())
-			item.grid_x = old_x
-			item.grid_y = old_y
-			item.position = Vector2(old_x * CELL_SIZE, old_y * CELL_SIZE)
+			item.animate_to_position(old_x, old_y)
 			_register_placement(iid, old_x, old_y, old_w, old_h)
 
 		operation_complete.emit(false, "Failed to move item")
@@ -260,8 +436,19 @@ func _on_item_right_clicked(item: StashItem) -> void:
 	item_context_menu.emit(item, get_global_mouse_position())
 
 
+func _on_item_hovered(item: StashItem) -> void:
+	hovered_item = item
+	item_hovered_changed.emit(item)
+
+
+func _on_item_unhovered(_item: StashItem) -> void:
+	hovered_item = null
+	item_hovered_changed.emit(null)
+
+
 func _on_item_drag_started(item: StashItem) -> void:
 	dragging_item = item
+	queue_redraw()
 
 
 func _on_item_drag_ended(_item: StashItem, _success: bool) -> void:
@@ -280,3 +467,8 @@ func get_item_at(x: int, y: int) -> StashItem:
 		if iid in items:
 			return items[iid]
 	return null
+
+
+## Get the currently hovered item
+func get_hovered_item() -> StashItem:
+	return hovered_item
