@@ -54,6 +54,15 @@ var is_logged_in: bool = false
 
 
 func _ready() -> void:
+	# Check for dedicated server mode - skip UI and load game directly
+	if _is_dedicated_server():
+		print("[MainMenu] Dedicated server detected, loading game world...")
+		# Wait for HeadlessServer to start the network
+		# HeadlessServer handles server startup, we just load the scene
+		await get_tree().create_timer(0.5).timeout
+		get_tree().change_scene_to_file("res://scenes/game_world.tscn")
+		return
+
 	# Build the entire UI programmatically for full control
 	_create_background()
 	_create_main_menu()
@@ -766,3 +775,12 @@ func _enable_direct_buttons() -> void:
 func _load_game() -> void:
 	await get_tree().create_timer(0.5).timeout
 	get_tree().change_scene_to_file("res://scenes/game_world.tscn")
+
+
+## Check if running as dedicated server (headless mode)
+func _is_dedicated_server() -> bool:
+	var args := OS.get_cmdline_args()
+	for arg in args:
+		if arg == "--headless" or arg == "--server":
+			return true
+	return DisplayServer.get_name() == "headless"
