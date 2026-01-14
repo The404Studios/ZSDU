@@ -603,15 +603,14 @@ func _on_sigil_corrupted() -> void:
 # ============================================
 
 func _setup_hud_connections() -> void:
-	# Find HUD in scene
-	var animated_hud: AnimatedHUD = null
+	# Find HUD in scene - use untyped variable to avoid cast errors
+	var animated_hud = null
 
 	if hud and hud is AnimatedHUD:
-		@warning_ignore("unsafe_cast")
 		animated_hud = hud
 	else:
 		# Look for HUD in UI layer
-		var root_hud := get_node_or_null("/root/AnimatedHUD")
+		var root_hud = get_node_or_null("/root/AnimatedHUD")
 		if root_hud and root_hud is AnimatedHUD:
 			animated_hud = root_hud
 		else:
