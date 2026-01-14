@@ -42,6 +42,7 @@ var movement_controller: MovementController = null
 var combat_controller: CombatController = null
 var animation_controller: AnimationController = null
 var inventory_runtime: InventoryRuntime = null
+var equipment_runtime: EquipmentRuntime = null
 var network_controller: PlayerNetworkController = null
 
 # Prop handler (for barricade system)
@@ -82,6 +83,9 @@ func _setup_controllers() -> void:
 	inventory_runtime = InventoryRuntime.new()
 	inventory_runtime.name = "InventoryRuntime"
 	add_child(inventory_runtime)
+
+	# Equipment Runtime (armor, rig, accessories)
+	equipment_runtime = EquipmentRuntime.new()
 
 	# Combat Controller
 	combat_controller = CombatController.new()
@@ -318,14 +322,21 @@ func apply_input(input_data: Dictionary) -> void:
 
 
 ## Take damage (server-side only)
-func take_damage(amount: float, _from_position: Vector3 = Vector3.ZERO) -> void:
+## damage_type: "bullet", "blunt", "pierce", "zombie"
+## is_headshot: True if the hit was to the head
+func take_damage(amount: float, _from_position: Vector3 = Vector3.ZERO, damage_type: String = "bullet", is_headshot: bool = false) -> void:
 	if not NetworkManager.is_authority():
 		return
 
 	if is_dead:
 		return
 
-	health -= amount
+	# Apply armor reduction
+	var final_damage := amount
+	if equipment_runtime:
+		final_damage = equipment_runtime.apply_armor(amount, damage_type, is_headshot)
+
+	health -= final_damage
 
 	if health <= 0:
 		health = 0
@@ -419,6 +430,10 @@ func get_combat_controller() -> CombatController:
 
 func get_inventory_runtime() -> InventoryRuntime:
 	return inventory_runtime
+
+
+func get_equipment_runtime() -> EquipmentRuntime:
+	return equipment_runtime
 
 
 func get_weapon_manager() -> WeaponManager:

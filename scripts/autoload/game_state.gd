@@ -216,6 +216,8 @@ func process_action_request(peer_id: int, action_type: String, action_data: Dict
 			_handle_nail_while_holding(peer_id, action_data)
 		"shoot":
 			_handle_shoot(peer_id, action_data)
+		"melee_attack":
+			_handle_melee_attack(peer_id, action_data)
 
 
 ## Handle event from server (client-side)
@@ -1139,6 +1141,79 @@ func _damage_player(target_peer_id: int, damage: float, hit_position: Vector3) -
 
 	if player.has_method("take_damage"):
 		player.take_damage(damage, hit_position)
+
+
+## Handle melee attack request (server-side)
+## Used by hammer and melee weapons (knife, machete, etc.)
+func _handle_melee_attack(peer_id: int, data: Dictionary) -> void:
+	if peer_id not in players:
+		return
+
+	var player: Node3D = players[peer_id]
+	if not is_instance_valid(player):
+		return
+
+	var origin: Vector3 = data.get("origin", Vector3.ZERO)
+	var direction: Vector3 = data.get("direction", Vector3.FORWARD).normalized()
+	var damage: float = data.get("damage", 10.0)
+	var weapon: String = data.get("weapon", "melee")
+	var hit_position: Vector3 = data.get("hit_position", origin + direction * 2.0)
+
+	# Validate origin is near player
+	var player_pos: Vector3 = player.global_position
+	if origin.distance_to(player_pos) > 3.0:
+		push_warning("[GameState] Suspicious melee origin from peer %d" % peer_id)
+		return
+
+	# Validate player is alive
+	var player_health: float = 100.0
+	if "health" in player:
+		player_health = player.health
+	if player_health <= 0:
+		return
+
+	# Server performs its own raycast to validate the hit
+	if not world_node:
+		return
+
+	var space_state := world_node.get_world_3d().direct_space_state
+	var query := PhysicsRayQueryParameters3D.create(origin, origin + direction * 3.0)
+	query.collision_mask = 0b00000100  # Zombies only for melee
+
+	if player is CollisionObject3D:
+		query.exclude = [player.get_rid()]
+
+	var result := space_state.intersect_ray(query)
+
+	if not result:
+		return
+
+	var collider: Node = result.collider
+	var server_hit_pos: Vector3 = result.position
+
+	# Build hit data
+	var hit_data := {
+		"shooter_id": peer_id,
+		"position": server_hit_pos,
+		"damage": damage,
+		"weapon": weapon,
+		"is_melee": true,
+		"target_type": "unknown",
+		"target_id": -1,
+	}
+
+	# Process hit on zombie
+	if collider.is_in_group("zombies"):
+		var zombie_id: int = collider.zombie_id if "zombie_id" in collider else -1
+		if zombie_id >= 0:
+			hit_data["target_type"] = "zombie"
+			hit_data["target_id"] = zombie_id
+			_damage_zombie(zombie_id, damage, server_hit_pos)
+
+	# Broadcast hit confirmation
+	if NetworkManager:
+		NetworkManager.broadcast_event.rpc("hit_confirmed", hit_data)
+	hit_confirmed.emit(peer_id, hit_data)
 
 
 # ============================================

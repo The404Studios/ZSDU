@@ -493,6 +493,11 @@ func _api_request(endpoint: String, data: Dictionary) -> Dictionary:
 
 	var url := BackendConfig.get_http_url() + endpoint
 	var headers := ["Content-Type: application/json"]
+
+	# Add session token if authenticated
+	if session_token != "":
+		headers.append("Authorization: Bearer %s" % session_token)
+
 	var body := JSON.stringify(data)
 
 	var error := http.request(url, headers, HTTPClient.METHOD_POST, body)
@@ -505,6 +510,12 @@ func _api_request(endpoint: String, data: Dictionary) -> Dictionary:
 
 	if result[0] != HTTPRequest.RESULT_SUCCESS:
 		return { "error": "HTTP error" }
+
+	# Handle authentication errors
+	if result[1] == 401:
+		is_logged_in = false
+		session_token = ""
+		return { "error": "Session expired - please login again" }
 
 	var json := JSON.new()
 	if json.parse(result[3].get_string_from_utf8()) != OK:
@@ -519,8 +530,13 @@ func _api_get(endpoint: String) -> Dictionary:
 	add_child(http)
 
 	var url := BackendConfig.get_http_url() + endpoint
+	var headers: PackedStringArray = []
 
-	var error := http.request(url, [], HTTPClient.METHOD_GET)
+	# Add session token if authenticated
+	if session_token != "":
+		headers.append("Authorization: Bearer %s" % session_token)
+
+	var error := http.request(url, headers, HTTPClient.METHOD_GET)
 	if error != OK:
 		http.queue_free()
 		return { "error": "Request failed" }
@@ -530,6 +546,12 @@ func _api_get(endpoint: String) -> Dictionary:
 
 	if result[0] != HTTPRequest.RESULT_SUCCESS:
 		return { "error": "HTTP error" }
+
+	# Handle authentication errors
+	if result[1] == 401:
+		is_logged_in = false
+		session_token = ""
+		return { "error": "Session expired - please login again" }
 
 	var json := JSON.new()
 	if json.parse(result[3].get_string_from_utf8()) != OK:
