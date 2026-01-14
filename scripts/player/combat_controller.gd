@@ -31,6 +31,12 @@ var fire_cooldown := 0.0
 var current_weapon: WeaponRuntime = null
 var current_slot := 0
 
+# Attribute multipliers (set by PlayerController from AttributeSystem)
+var attribute_reload_speed_mult: float = 1.0
+var attribute_ads_speed_mult: float = 1.0
+var attribute_crit_chance: float = 0.05
+var attribute_crit_damage_mult: float = 1.5
+
 # References
 var animation_controller: AnimationController = null
 var inventory_runtime: InventoryRuntime = null
@@ -96,14 +102,21 @@ func _request_fire() -> void:
 	# Set cooldown
 	fire_cooldown = current_weapon.fire_rate
 
+	# Calculate critical hit (luck-based)
+	var is_crit := randf() < attribute_crit_chance
+	var final_damage := current_weapon.damage
+	if is_crit:
+		final_damage *= attribute_crit_damage_mult
+
 	# Build weapon state for network
 	var weapon_state := {
 		"slot": current_slot,
 		"ads": is_ads,
 		"origin": camera.global_position if camera else Vector3.ZERO,
 		"direction": -camera.global_basis.z if camera else Vector3.FORWARD,
-		"damage": current_weapon.damage,
+		"damage": final_damage,
 		"spread": current_weapon.get_spread(is_ads),
+		"crit": is_crit,
 	}
 
 	fire_requested.emit(weapon_state)
