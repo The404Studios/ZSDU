@@ -1,6 +1,6 @@
 [gd_scene load_steps=3 format=3 uid="uid://dloadout_screen"]
 
-[ext_resource type="Script" path="res://scripts/ui/stash/loadout_screen.gd" id="1_loadout"]
+[ext_resource type="Script" path="res://scripts/ui/loadout/loadout_screen.gd" id="1_loadout"]
 [ext_resource type="Script" path="res://scripts/ui/stash/stash_grid.gd" id="2_stash_grid"]
 
 [node name="LoadoutScreen" type="Control"]
