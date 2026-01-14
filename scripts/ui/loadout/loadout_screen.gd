@@ -459,7 +459,7 @@ func _on_ready_pressed() -> void:
 		loadout_data[slot_name] = loadout[slot]
 
 	# Prepare raid via backend
-	var lobby_id := LobbySystem.get_current_lobby_id() if LobbySystem else "direct_%d" % Time.get_unix_time_from_system()
+	var lobby_id: String = LobbySystem.get_current_lobby_id() if LobbySystem else "direct_%d" % Time.get_unix_time_from_system()
 	var success := await EconomyService.prepare_raid(lobby_id, loadout_data)
 
 	ready_button.disabled = false

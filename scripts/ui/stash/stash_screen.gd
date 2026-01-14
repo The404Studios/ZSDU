@@ -340,10 +340,10 @@ func _update_tooltip_stats(item: StashItem, item_def: Dictionary, item_data: Dic
 	var stats_to_show: Array[Dictionary] = []
 
 	# Durability
-	var durability := item_data.get("durability", -1.0)
-	var max_durability := item_def.get("max_durability", -1.0)
+	var durability: float = item_data.get("durability", -1.0)
+	var max_durability: float = item_def.get("max_durability", -1.0)
 	if durability >= 0 and max_durability > 0:
-		var percent := (durability / max_durability) * 100.0
+		var percent: float = (durability / max_durability) * 100.0
 		var dur_color := Color.GREEN
 		if percent < 25:
 			dur_color = Color.RED
@@ -420,7 +420,7 @@ func _update_tooltip_stats(item: StashItem, item_def: Dictionary, item_data: Dic
 		})
 
 	if item_def.has("uses"):
-		var uses_left := item_data.get("uses_remaining", item_def.uses)
+		var uses_left: int = item_data.get("uses_remaining", item_def.uses)
 		stats_to_show.append({
 			"label": "Uses",
 			"value": "%d / %d" % [uses_left, item_def.uses],
@@ -564,7 +564,7 @@ func _on_item_context_menu(item: StashItem, pos: Vector2) -> void:
 		return
 
 	# Configure menu based on item
-	var stack := item.item_data.get("stack", 1)
+	var stack: int = item.item_data.get("stack", 1)
 	context_menu.set_item_disabled(2, stack <= 1)  # Split only for stacks > 1
 	context_menu.set_item_disabled(3, item.is_locked)  # Can't sell locked
 	context_menu.set_item_disabled(4, item.is_locked)  # Can't list locked

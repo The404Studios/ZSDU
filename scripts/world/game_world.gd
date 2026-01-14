@@ -534,15 +534,18 @@ func _setup_hud_connections() -> void:
 	var animated_hud: AnimatedHUD = null
 
 	if hud and hud is AnimatedHUD:
-		animated_hud = hud as AnimatedHUD
+		@warning_ignore("unsafe_cast")
+		animated_hud = hud
 	else:
 		# Look for HUD in UI layer
-		animated_hud = get_node_or_null("/root/AnimatedHUD") as AnimatedHUD
-		if not animated_hud:
+		var root_hud := get_node_or_null("/root/AnimatedHUD")
+		if root_hud and root_hud is AnimatedHUD:
+			animated_hud = root_hud
+		else:
 			# Look for it as child
 			for child in get_children():
 				if child is AnimatedHUD:
-					animated_hud = child as AnimatedHUD
+					animated_hud = child
 					break
 
 	if not animated_hud:

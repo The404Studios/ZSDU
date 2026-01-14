@@ -465,7 +465,7 @@ func get_rarity_color() -> Color:
 	return _border_color
 
 
-func get_tooltip_text() -> String:
+func get_item_tooltip_text() -> String:
 	var name_text: String = item_def.get("name", def_id)
 	var desc: String = item_def.get("description", "")
 	var category: String = item_def.get("category", "misc")
