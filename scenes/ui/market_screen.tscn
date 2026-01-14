@@ -1,6 +1,6 @@
 [gd_scene load_steps=2 format=3 uid="uid://dmarket_screen"]
 
-[ext_resource type="Script" path="res://scripts/ui/stash/market_screen.gd" id="1_market"]
+[ext_resource type="Script" path="res://scripts/ui/market/market_screen.gd" id="1_market"]
 
 [node name="MarketScreen" type="Control"]
 layout_mode = 3
