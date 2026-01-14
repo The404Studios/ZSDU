@@ -18,6 +18,8 @@ signal hit_confirmed(peer_id: int, hit_data: Dictionary)
 signal game_over(reason: String, victory: bool)
 signal extraction_available()
 signal player_extracted(peer_id: int)
+signal sigil_damaged(damage: float, current_health: float, max_health: float)
+signal sigil_corrupted(corruption_count: int)
 
 enum GamePhase {
 	LOBBY,
@@ -262,6 +264,10 @@ func handle_event(event_type: String, event_data: Dictionary) -> void:
 			_handle_extraction_unlocked_event(event_data)
 		"player_extracted":
 			_handle_player_extracted_event(event_data)
+		"sigil_damaged":
+			_handle_sigil_damaged_event(event_data)
+		"sigil_corrupted":
+			_handle_sigil_corrupted_event(event_data)
 
 
 ## Handle game over event (client-side)
@@ -296,6 +302,24 @@ func _handle_player_extracted_event(event_data: Dictionary) -> void:
 	print("[GameState] Player %d extracted!" % peer_id)
 
 	player_extracted.emit(peer_id)
+
+
+## Handle sigil damaged event (client-side)
+func _handle_sigil_damaged_event(event_data: Dictionary) -> void:
+	var damage: float = event_data.get("damage", 0.0)
+	var health: float = event_data.get("health", 0.0)
+	var max_health: float = event_data.get("max_health", 1000.0)
+
+	sigil_damaged.emit(damage, health, max_health)
+
+
+## Handle sigil corrupted event (client-side)
+func _handle_sigil_corrupted_event(event_data: Dictionary) -> void:
+	var corruption_count: int = event_data.get("corruption_count", 0)
+
+	print("[GameState] Sigil corrupted! Count: %d" % corruption_count)
+
+	sigil_corrupted.emit(corruption_count)
 
 
 ## Called when a player disconnects

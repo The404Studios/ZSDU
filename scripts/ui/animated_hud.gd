@@ -52,6 +52,13 @@ var wave_label: Label
 var wave_number: Label
 var wave_subtitle: Label
 
+# Sigil health display
+var sigil_container: Control
+var sigil_bar: ProgressBar
+var sigil_label: Label
+var sigil_health := 1000.0
+var sigil_max_health := 1000.0
+
 # Kill feed
 var kill_feed_container: VBoxContainer
 var kill_feed_max := 5
@@ -103,6 +110,7 @@ func _build_ui() -> void:
 	_build_stamina_bar(root)
 	_build_ammo_display(root)
 	_build_wave_display(root)
+	_build_sigil_display(root)
 	_build_kill_feed(root)
 	_build_crosshair(root)
 	_build_vignette(root)
@@ -319,6 +327,53 @@ func _build_wave_display(parent: Control) -> void:
 	wave_subtitle.modulate = Color(0.6, 0.6, 0.6)
 	wave_subtitle.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	wave_container.add_child(wave_subtitle)
+
+
+func _build_sigil_display(parent: Control) -> void:
+	sigil_container = Control.new()
+	sigil_container.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	sigil_container.position = Vector2(20, 20)
+	sigil_container.size = Vector2(200, 50)
+	sigil_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	parent.add_child(sigil_container)
+
+	# Label
+	var label := Label.new()
+	label.text = "SIGIL"
+	label.add_theme_font_size_override("font_size", 12)
+	label.modulate = Color(0.8, 0.6, 1.0)
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	sigil_container.add_child(label)
+
+	# Background
+	var bg := ColorRect.new()
+	bg.position = Vector2(0, 18)
+	bg.color = Color(0.1, 0.1, 0.1, 0.8)
+	bg.size = Vector2(200, 24)
+	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	sigil_container.add_child(bg)
+
+	# Sigil health bar
+	sigil_bar = ProgressBar.new()
+	sigil_bar.position = Vector2(5, 20)
+	sigil_bar.size = Vector2(150, 18)
+	sigil_bar.max_value = 1000
+	sigil_bar.value = 1000
+	sigil_bar.show_percentage = false
+	sigil_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_style_progress_bar(sigil_bar, Color(0.6, 0.3, 0.8))
+	sigil_container.add_child(sigil_bar)
+
+	# Health text
+	sigil_label = Label.new()
+	sigil_label.position = Vector2(160, 18)
+	sigil_label.size = Vector2(40, 24)
+	sigil_label.text = "100%"
+	sigil_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	sigil_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	sigil_label.add_theme_font_size_override("font_size", 12)
+	sigil_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	sigil_container.add_child(sigil_label)
 
 
 func _build_kill_feed(parent: Control) -> void:
@@ -741,6 +796,41 @@ func expand_crosshair(amount: float = 1.0) -> void:
 # ============================================
 # PUBLIC API
 # ============================================
+
+## Update sigil health display
+func update_sigil_health(current: float, max_val: float) -> void:
+	sigil_health = current
+	sigil_max_health = max_val
+
+	sigil_bar.max_value = max_val
+
+	# Animate the bar
+	var tween := sigil_bar.create_tween()
+	tween.tween_property(sigil_bar, "value", current, 0.3)\
+		.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+
+	# Update percentage text
+	var percent := int((current / max_val) * 100) if max_val > 0 else 0
+	sigil_label.text = "%d%%" % percent
+
+	# Color based on health
+	if percent <= 20:
+		sigil_bar.modulate = Color(1.5, 0.3, 0.3)
+		# Shake when critical
+		anim.shake(sigil_container, 5.0, 0.2)
+	elif percent <= 50:
+		sigil_bar.modulate = Color(1.2, 0.8, 0.4)
+	else:
+		sigil_bar.modulate = Color.WHITE
+
+
+## Flash sigil bar when corrupted (zombie reached sigil)
+func on_sigil_corrupted() -> void:
+	var flash_tween := sigil_container.create_tween()
+	flash_tween.tween_property(sigil_bar, "modulate", Color(2, 0.2, 0.2), 0.1)
+	flash_tween.tween_property(sigil_bar, "modulate", Color.WHITE, 0.3)
+	anim.shake(sigil_container, 8.0, 0.3)
+
 
 ## Connect to a player controller for automatic updates
 func connect_to_player(player: PlayerController) -> void:
