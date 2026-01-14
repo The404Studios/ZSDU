@@ -231,6 +231,8 @@ func handle_event(event_type: String, event_data: Dictionary) -> void:
 			_spawn_player_local(event_data.peer_id, event_data.position)
 		"spawn_zombie":
 			_spawn_zombie_local(event_data.zombie_id, event_data.position, event_data.zombie_type)
+		"zombie_killed":
+			_kill_zombie_local(event_data.zombie_id)
 		"nail_created":
 			_create_nail_local(event_data)
 		"nail_destroyed":
@@ -446,6 +448,24 @@ func _spawn_zombie_local(zombie_id: int, position: Vector3, zombie_type: String)
 	zombie_spawned.emit(zombie_id)
 
 
+## Kill zombie locally (client-side, from server event)
+func _kill_zombie_local(zombie_id: int) -> void:
+	if zombie_id not in zombies:
+		return
+
+	var zombie: Node3D = zombies[zombie_id]
+	if is_instance_valid(zombie):
+		# Play death animation if available
+		if zombie.has_method("play_death"):
+			zombie.play_death()
+		else:
+			# Immediate removal if no death animation
+			zombie.queue_free()
+
+	zombies.erase(zombie_id)
+	zombie_killed.emit(zombie_id)
+
+
 ## Kill a zombie (server-side)
 func kill_zombie(zombie_id: int) -> void:
 	if not NetworkManager.is_authority():
@@ -471,6 +491,14 @@ func kill_zombie(zombie_id: int) -> void:
 
 		zombies.erase(zombie_id)
 		wave_zombies_killed += 1
+
+		# Broadcast zombie death to all clients
+		NetworkManager.broadcast_event.rpc("zombie_killed", {
+			"zombie_id": zombie_id,
+			"position": zombie_pos,
+			"zombie_type": zombie_type
+		})
+
 		zombie_killed.emit(zombie_id)
 
 
