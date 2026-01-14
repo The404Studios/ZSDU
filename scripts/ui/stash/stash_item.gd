@@ -188,7 +188,7 @@ func get_grid_height() -> int:
 	return w if item_rotation == 1 else h
 
 
-func _get_tooltip_text() -> String:
+func get_tooltip_text() -> String:
 	var name_text: String = item_def.get("name", def_id)
 	var desc: String = item_def.get("description", "")
 	var category: String = item_def.get("category", "misc")

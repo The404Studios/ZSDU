@@ -294,21 +294,29 @@ func _get_player_spawn_info(peer_id: int) -> Dictionary:
 
 
 func _equip_player(player: PlayerController) -> void:
-	# Give default weapons if no loadout exists
 	var inventory := player.get_inventory_runtime()
-	if inventory and inventory.get_weapon(0) == null:
-		inventory.setup_default_loadout()
-		print("[GameWorld] Gave default loadout to player %d" % player.peer_id)
+	var equipment := player.get_equipment_runtime()
 
-		# Bind primary weapon to combat controller
-		var combat := player.get_combat_controller()
-		if combat:
-			var weapon := inventory.get_weapon(0)
-			if weapon:
-				combat.bind_weapon(weapon)
-				print("[GameWorld] Bound weapon '%s' to player %d" % [weapon.name, player.peer_id])
+	# Try to apply loadout from EconomyService (if player prepared a raid)
+	var loadout_applied := false
+	if EconomyService and EconomyService.is_logged_in:
+		loadout_applied = _apply_loadout_from_economy(player, inventory, equipment)
 
-	# Give hammer (barricading tool, not a combat WeaponRuntime)
+	# Fall back to default loadout if no prepared loadout
+	if not loadout_applied:
+		if inventory and inventory.get_weapon(0) == null:
+			inventory.setup_default_loadout()
+			print("[GameWorld] Gave default loadout to player %d" % player.peer_id)
+
+			# Bind primary weapon to combat controller
+			var combat := player.get_combat_controller()
+			if combat:
+				var weapon := inventory.get_weapon(0)
+				if weapon:
+					combat.bind_weapon(weapon)
+					print("[GameWorld] Bound weapon '%s' to player %d" % [weapon.name, player.peer_id])
+
+	# Give hammer (barricading tool, always available)
 	var hammer_scene := load("res://scenes/weapons/hammer.tscn")
 	if hammer_scene:
 		var hammer: Hammer = hammer_scene.instantiate()
@@ -321,6 +329,84 @@ func _equip_player(player: PlayerController) -> void:
 
 		# Store hammer reference on player for access via get_meta
 		player.set_meta("hammer", hammer)
+
+
+## Apply loadout from EconomyService (prepared raid items)
+func _apply_loadout_from_economy(player: PlayerController, inventory: InventoryRuntime, equipment: EquipmentRuntime) -> bool:
+	var locked_iids: Array = EconomyService.locked_iids
+	if locked_iids.is_empty():
+		return false
+
+	print("[GameWorld] Applying loadout with %d locked items for player %d" % [locked_iids.size(), player.peer_id])
+
+	var equipped_primary := false
+
+	for iid in locked_iids:
+		var item: Dictionary = EconomyService.get_item(iid)
+		if item.is_empty():
+			continue
+
+		var def_id: String = item.get("def_id", item.get("defId", ""))
+		var item_def: Dictionary = EconomyService.get_item_def(def_id)
+		var category: String = item_def.get("category", "misc").to_lower()
+
+		# Handle weapons
+		if category in ["weapon", "rifle", "shotgun", "smg", "pistol"]:
+			if inventory:
+				var weapon := _create_weapon_from_item(item, item_def)
+				if weapon:
+					var slot := 0 if not equipped_primary else 1
+					inventory.add_weapon(weapon, slot)
+					print("[GameWorld] Equipped %s in slot %d" % [weapon.name, slot])
+
+					if slot == 0:
+						equipped_primary = true
+						var combat := player.get_combat_controller()
+						if combat:
+							combat.bind_weapon(weapon)
+
+		# Handle armor/equipment
+		elif category in ["helmet", "headwear"]:
+			if equipment:
+				equipment.equip_item("helmet", item)
+				print("[GameWorld] Equipped helmet: %s" % item_def.get("name", def_id))
+
+		elif category in ["armor", "vest"]:
+			if equipment:
+				equipment.equip_item("vest", item)
+				print("[GameWorld] Equipped vest: %s" % item_def.get("name", def_id))
+
+		elif category in ["rig", "tactical_rig"]:
+			if equipment:
+				equipment.equip_item("rig", item)
+				print("[GameWorld] Equipped rig: %s" % item_def.get("name", def_id))
+
+		elif category in ["backpack", "bag"]:
+			if equipment:
+				equipment.equip_item("backpack", item)
+				print("[GameWorld] Equipped backpack: %s" % item_def.get("name", def_id))
+
+		# Handle consumables/ammo - add to inventory
+		elif category in ["ammo", "medical", "consumable"]:
+			if inventory:
+				inventory.add_item_to_container(item, item_def)
+
+	return locked_iids.size() > 0
+
+
+## Create a WeaponRuntime from item data
+func _create_weapon_from_item(item: Dictionary, item_def: Dictionary) -> WeaponRuntime:
+	var weapon := WeaponRuntime.new()
+	weapon.name = item_def.get("name", "Weapon")
+	weapon.weapon_type = item_def.get("weapon_type", "rifle")
+	weapon.damage = item_def.get("damage", 25.0)
+	weapon.fire_rate = item_def.get("fire_rate", 0.1)
+	weapon.magazine_size = item_def.get("magazine_size", 30)
+	weapon.current_ammo = item.get("ammo", weapon.magazine_size)
+	weapon.reload_time = item_def.get("reload_time", 2.0)
+	weapon.range_max = item_def.get("range", 100.0)
+	weapon.spread_base = item_def.get("spread", 0.02)
+	return weapon
 
 
 ## Fast round reset (for testing or game restart)

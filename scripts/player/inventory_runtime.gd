@@ -337,3 +337,38 @@ func setup_default_loadout() -> void:
 	current_weapon_slot = 0
 	loadout_ready.emit()
 	print("[InventoryRuntime] Default loadout initialized")
+
+
+## Add a weapon to a specific slot
+func add_weapon(weapon: WeaponRuntime, slot: int) -> bool:
+	if slot < 0 or slot >= weapons.size():
+		return false
+
+	weapons[slot] = weapon
+	weapon_equipped.emit(slot, weapon)
+	return true
+
+
+## Add item to container (for ammo, consumables, etc.)
+func add_item_to_container(item: Dictionary, item_def: Dictionary) -> bool:
+	var category: String = item_def.get("category", "misc").to_lower()
+	var stack: int = item.get("stack", 1)
+
+	# Handle ammo
+	if category == "ammo":
+		var ammo_type: String = item_def.get("ammo_type", item_def.get("def_id", "generic"))
+		add_ammo(ammo_type, stack)
+		print("[InventoryRuntime] Added %d %s ammo" % [stack, ammo_type])
+		return true
+
+	# Handle consumables/medical - add to provisional loot for now
+	var def_id: String = item.get("def_id", item.get("defId", ""))
+	var durability: float = item.get("durability", 1.0)
+	provisional_loot.append({
+		"def_id": def_id,
+		"stack": stack,
+		"durability": durability,
+		"mods": item.get("mods", [])
+	})
+	print("[InventoryRuntime] Added %d %s to container" % [stack, def_id])
+	return true
