@@ -346,7 +346,7 @@ func _server_validate_fire(weapon_state: Dictionary) -> void:
 		# Damage zombies
 		if collider.is_in_group("zombies"):
 			var zombie_id: int = collider.get("zombie_id")
-			GameState._damage_zombie(zombie_id, damage, result.position)
+			GameState._damage_zombie(zombie_id, damage, result.position, peer_id)
 
 		# Damage other players (if friendly fire enabled)
 		# if collider.is_in_group("players"):

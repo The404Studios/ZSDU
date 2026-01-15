@@ -37,6 +37,12 @@ var attribute_ads_speed_mult: float = 1.0
 var attribute_crit_chance: float = 0.05
 var attribute_crit_damage_mult: float = 1.5
 
+# Skill multipliers (set by PlayerController from SkillSystem)
+var skill_damage_mult: float = 1.0
+var skill_fire_rate_mult: float = 1.0
+var skill_accuracy_mult: float = 1.0
+var skill_recoil_mult: float = 1.0
+
 # References
 var animation_controller: AnimationController = null
 var inventory_runtime: InventoryRuntime = null

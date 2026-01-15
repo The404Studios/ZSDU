@@ -56,6 +56,9 @@ var attribute_stamina_regen_mult: float = 1.0
 var equipment_speed_modifier: float = 1.0
 var equipment_stamina_modifier: float = 1.0
 
+# Carry state (checked from PropHandler)
+var prop_handler: PropHandler = null  # Set by PlayerController
+
 # References
 var body: CharacterBody3D = null
 var collision_shape: CollisionShape3D = null
@@ -79,29 +82,42 @@ func process_input(input: PlayerInput, delta: float) -> void:
 	if input.prone:
 		_toggle_prone()
 
-	# Determine if sprinting is possible
+	# Check carry state from PropHandler
+	var is_carrying := false
+	var carry_speed_mult := 1.0
+	var can_sprint_while_carrying := true
+	var can_jump_while_carrying := true
+
+	if prop_handler:
+		is_carrying = prop_handler.is_holding
+		carry_speed_mult = prop_handler.get_carry_speed_mult()
+		can_sprint_while_carrying = prop_handler.can_sprint()
+		can_jump_while_carrying = prop_handler.can_jump()
+
+	# Determine if sprinting is possible (can't sprint while carrying heavy props)
 	var can_sprint := (
 		posture == PlayerState.Posture.STAND and
 		stamina > 0 and
 		input.sprint and
 		input.move_dir.length() > 0.1 and
-		body.is_on_floor()
+		body.is_on_floor() and
+		can_sprint_while_carrying
 	)
 
 	is_sprinting = can_sprint
 
-	# Get movement speed based on posture (with attribute + equipment bonuses)
-	var speed := _get_movement_speed() * attribute_move_speed_mult * equipment_speed_modifier
+	# Get movement speed based on posture (with attribute + equipment + carry bonuses)
+	var speed := _get_movement_speed() * attribute_move_speed_mult * equipment_speed_modifier * carry_speed_mult
 
-	# Apply sprint speed (with attribute + equipment bonuses)
+	# Apply sprint speed (with attribute + equipment bonuses, no sprint when carrying)
 	if is_sprinting:
 		speed = sprint_speed * attribute_sprint_speed_mult * equipment_speed_modifier
 
 	# Calculate desired velocity
 	desired_velocity = input.move_dir * speed
 
-	# Handle jump
-	wants_jump = input.jump and body.is_on_floor() and posture == PlayerState.Posture.STAND
+	# Handle jump (can't jump while carrying props)
+	wants_jump = input.jump and body.is_on_floor() and posture == PlayerState.Posture.STAND and can_jump_while_carrying
 
 	# Stamina management (equipment modifier affects drain: heavy armor = more drain)
 	if is_sprinting:

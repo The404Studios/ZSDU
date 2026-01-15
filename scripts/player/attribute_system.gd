@@ -231,29 +231,78 @@ func _recalculate_derived_stats() -> void:
 		"melee_damage_mult": 1.0 + (str_val - BASE_ATTRIBUTE) * 0.02,  # +2% per point
 		"carry_weight": 50 + str_val * 2,  # Base 50 + 2 per STR
 		"barricade_hp_mult": 1.0 + (str_val - BASE_ATTRIBUTE) * 0.015,  # +1.5% per point
+		"knockback_resist": minf((str_val - BASE_ATTRIBUTE) * 0.02, 0.5),  # Max 50% resist
+		"stagger_power": 1.0 + (str_val - BASE_ATTRIBUTE) * 0.015,  # Knockback dealt
+		"armor_penetration": (str_val - BASE_ATTRIBUTE) * 0.01,  # +1% armor pen per point
+		"explosion_resist": minf((str_val - BASE_ATTRIBUTE) * 0.01, 0.3),  # Max 30% resist
+		"throw_distance": 1.0 + (str_val - BASE_ATTRIBUTE) * 0.02,  # Grenade range
+		"melee_range": 1.0 + (str_val - BASE_ATTRIBUTE) * 0.005,  # Slight melee reach bonus
 
 		# Agility-based
 		"move_speed_mult": 1.0 + (agi_val - BASE_ATTRIBUTE) * 0.01,  # +1% per point
 		"reload_speed_mult": 1.0 + (agi_val - BASE_ATTRIBUTE) * 0.015,  # +1.5% per point
 		"ads_speed_mult": 1.0 + (agi_val - BASE_ATTRIBUTE) * 0.02,  # +2% per point
 		"sprint_speed_mult": 1.0 + (agi_val - BASE_ATTRIBUTE) * 0.015,
+		"dodge_chance": minf((agi_val - BASE_ATTRIBUTE) * 0.005, 0.15),  # Max 15% dodge
+		"weapon_swap_speed": 1.0 + (agi_val - BASE_ATTRIBUTE) * 0.02,
+		"fall_damage_reduction": minf((agi_val - BASE_ATTRIBUTE) * 0.03, 0.6),  # Max 60%
+		"crouch_speed_mult": 1.0 + (agi_val - BASE_ATTRIBUTE) * 0.02,  # Faster crouching
+		"strafe_speed_mult": 1.0 + (agi_val - BASE_ATTRIBUTE) * 0.01,  # Side movement
+		"jump_height_mult": 1.0 + (agi_val - BASE_ATTRIBUTE) * 0.005,  # Slight jump bonus
+		"slide_distance": 1.0 + (agi_val - BASE_ATTRIBUTE) * 0.015,  # Slide length
+		"climb_speed": 1.0 + (agi_val - BASE_ATTRIBUTE) * 0.02,  # Ladder/vault speed
+		"noise_reduction": minf((agi_val - BASE_ATTRIBUTE) * 0.01, 0.4),  # Max 40% quieter
 
 		# Endurance-based
 		"max_health": 100 + (end_val - BASE_ATTRIBUTE) * 5,  # +5 HP per point
 		"max_stamina": 100 + (end_val - BASE_ATTRIBUTE) * 3,  # +3 stamina per point
 		"stamina_regen_mult": 1.0 + (end_val - BASE_ATTRIBUTE) * 0.02,  # +2% per point
 		"health_regen": (end_val - BASE_ATTRIBUTE) * 0.1,  # +0.1 HP/sec per point
+		"bleed_resist": minf((end_val - BASE_ATTRIBUTE) * 0.02, 0.5),  # Max 50% resist
+		"poison_resist": minf((end_val - BASE_ATTRIBUTE) * 0.015, 0.4),  # Max 40% resist
+		"infection_resist": minf((end_val - BASE_ATTRIBUTE) * 0.01, 0.3),  # Max 30% resist
+		"max_armor": 50 + (end_val - BASE_ATTRIBUTE) * 2,  # Armor capacity
+		"stamina_drain_mult": 1.0 - minf((end_val - BASE_ATTRIBUTE) * 0.01, 0.3),  # Less stamina use
+		"breath_hold_time": 3.0 + (end_val - BASE_ATTRIBUTE) * 0.1,  # Sniper steadiness
+		"hunger_rate": 1.0 - minf((end_val - BASE_ATTRIBUTE) * 0.01, 0.3),  # Slower hunger
+		"thirst_rate": 1.0 - minf((end_val - BASE_ATTRIBUTE) * 0.01, 0.3),  # Slower thirst
+		"revive_speed_mult": 1.0 + (end_val - BASE_ATTRIBUTE) * 0.02,  # Revive teammates faster
 
 		# Intellect-based
 		"xp_multiplier": 1.0 + (int_val - BASE_ATTRIBUTE) * 0.02,  # +2% XP per point
-		"skill_cooldown_mult": 1.0 - (int_val - BASE_ATTRIBUTE) * 0.01,  # -1% cooldown per point
+		"skill_cooldown_mult": 1.0 - minf((int_val - BASE_ATTRIBUTE) * 0.01, 0.3),  # Max 30% CDR
 		"interaction_speed_mult": 1.0 + (int_val - BASE_ATTRIBUTE) * 0.015,  # +1.5% per point
+		"crafting_speed_mult": 1.0 + (int_val - BASE_ATTRIBUTE) * 0.02,
+		"item_efficiency": 1.0 + (int_val - BASE_ATTRIBUTE) * 0.01,  # Consumable effectiveness
+		"headshot_damage_mult": 1.5 + (int_val - BASE_ATTRIBUTE) * 0.02,  # +2% headshot dmg per point
+		"weak_spot_bonus": 1.0 + (int_val - BASE_ATTRIBUTE) * 0.02,  # General weak point damage
+		"enemy_highlight_range": 5.0 + (int_val - BASE_ATTRIBUTE) * 0.5,  # Detect enemies farther
+		"loot_detection_range": 3.0 + (int_val - BASE_ATTRIBUTE) * 0.3,  # See loot through walls
+		"trap_detection": minf((int_val - BASE_ATTRIBUTE) * 0.02, 0.8),  # Chance to detect traps
+		"hack_speed_mult": 1.0 + (int_val - BASE_ATTRIBUTE) * 0.03,  # Electronic interactions
+		"research_speed_mult": 1.0 + (int_val - BASE_ATTRIBUTE) * 0.02,  # Unlock items faster
 
 		# Luck-based
 		"crit_chance": 0.05 + lck_val * 0.005,  # 5% base + 0.5% per point
 		"crit_damage_mult": 1.5 + (lck_val - BASE_ATTRIBUTE) * 0.02,  # 150% base + 2% per point
 		"loot_quality_mult": 1.0 + (lck_val - BASE_ATTRIBUTE) * 0.02,  # +2% per point
 		"proc_chance_mult": 1.0 + (lck_val - BASE_ATTRIBUTE) * 0.01,  # +1% per point
+		"double_loot_chance": minf((lck_val - BASE_ATTRIBUTE) * 0.005, 0.15),  # Max 15%
+		"rare_spawn_chance": 1.0 + (lck_val - BASE_ATTRIBUTE) * 0.015,  # Better enemy drops
+		"jam_chance_reduction": minf((lck_val - BASE_ATTRIBUTE) * 0.02, 0.5),  # Less weapon jams
+		"ricochet_chance": minf((lck_val - BASE_ATTRIBUTE) * 0.003, 0.1),  # Bullets can bounce
+		"graze_chance": minf((lck_val - BASE_ATTRIBUTE) * 0.005, 0.2),  # Reduce incoming dmg to 10%
+		"lucky_find_mult": 1.0 + (lck_val - BASE_ATTRIBUTE) * 0.025,  # Better container loot
+		"scavenge_bonus": 1.0 + (lck_val - BASE_ATTRIBUTE) * 0.02,  # More from scavenging
+
+		# Combined stats (multiple attribute influence)
+		"damage_reduction": minf((str_val + end_val - BASE_ATTRIBUTE * 2) * 0.005, 0.25),  # Max 25%
+		"accuracy_bonus": (agi_val + int_val - BASE_ATTRIBUTE * 2) * 0.005,
+		"resource_efficiency": 1.0 + (int_val + lck_val - BASE_ATTRIBUTE * 2) * 0.005,
+		"bullet_penetration": minf((str_val + int_val - BASE_ATTRIBUTE * 2) * 0.005, 0.3),  # Shoot through
+		"stealth_damage_mult": 1.0 + (agi_val + lck_val - BASE_ATTRIBUTE * 2) * 0.01,  # Backstab bonus
+		"teamwork_radius": 5.0 + (end_val + int_val - BASE_ATTRIBUTE * 2) * 0.25,  # Shared buff range
+		"survival_instinct": minf((end_val + lck_val - BASE_ATTRIBUTE * 2) * 0.005, 0.25),  # Auto heal at low HP
 	}
 
 	derived_stats_updated.emit(derived_stats)

@@ -17,12 +17,31 @@ signal operation_failed(error: String)
 signal raid_prepared(raid_id: String, locked_iids: Array)
 signal raid_committed(results: Dictionary)
 signal gold_changed(new_amount: int)
+signal character_data_loaded(data: Dictionary)
+signal character_data_saved()
 
 # Character state
 var character_id: String = ""
 var character_name: String = ""
 var session_token: String = ""
 var is_logged_in: bool = false
+
+# Character progression data (attributes, skills, XP)
+var character_data: Dictionary = {
+	"level": 1,
+	"experience": 0,
+	"attribute_points": 5,
+	"base_attributes": {
+		"strength": 10,
+		"agility": 10,
+		"endurance": 10,
+		"intellect": 10,
+		"luck": 10
+	},
+	"skill_data": {},
+	"prestige_level": 0,
+	"total_xp": 0
+}
 
 # Stash cache (updated from backend)
 var stash_data: Dictionary = {}  # { w, h, placements }
@@ -37,10 +56,16 @@ var item_defs: Dictionary = {}  # def_id -> item def
 var current_raid_id: String = ""
 var locked_iids: Array = []
 
+# Local storage path for character data caching
+const CHARACTER_CACHE_PATH := "user://character_cache.cfg"
+
 
 func _ready() -> void:
 	# Load item definitions on startup
 	_load_item_defs()
+
+	# Load cached character data (for offline support)
+	_load_character_cache()
 
 
 # ============================================
@@ -67,7 +92,8 @@ func login(username: String) -> void:
 	print("[Economy] Logged in: %s (%s)" % [character_name, character_id])
 	logged_in.emit(character_id, character_name)
 
-	# Fetch stash after login
+	# Fetch character data and stash after login
+	await fetch_character_data()
 	await refresh_stash()
 
 
@@ -82,6 +108,182 @@ func logout() -> void:
 	wallet = { "gold": 0 }
 	current_raid_id = ""
 	locked_iids = []
+
+
+# ============================================
+# CHARACTER DATA PERSISTENCE
+# ============================================
+
+## Fetch character progression data from backend
+func fetch_character_data() -> void:
+	if character_id == "":
+		return
+
+	var result := await _api_get("/character/%s" % character_id)
+
+	if result.has("error"):
+		# Backend unavailable - use cached data
+		print("[Economy] Failed to fetch character data, using cache: %s" % result.error)
+		character_data_loaded.emit(character_data)
+		return
+
+	# Update local character data
+	_apply_character_data(result)
+	character_data_loaded.emit(character_data)
+
+	# Save to local cache
+	_save_character_cache()
+
+
+## Save character progression data to backend
+func save_character_data(data: Dictionary = {}) -> bool:
+	if character_id == "":
+		return false
+
+	# Merge provided data with current state
+	if not data.is_empty():
+		_merge_character_data(data)
+
+	var result := await _api_request("/character/%s/save" % character_id, character_data)
+
+	if result.has("error"):
+		operation_failed.emit(result.error)
+		# Still save locally even if backend fails
+		_save_character_cache()
+		return false
+
+	# Update from server response (in case of server-side validation)
+	if result.has("character"):
+		_apply_character_data(result.character)
+
+	_save_character_cache()
+	character_data_saved.emit()
+	return true
+
+
+## Add XP to character (call after raid completion)
+func add_experience(xp: int) -> void:
+	character_data.experience = character_data.get("experience", 0) + xp
+	character_data.total_xp = character_data.get("total_xp", 0) + xp
+
+	# Check for level up
+	var current_level: int = character_data.get("level", 1)
+	var xp_required := _get_xp_for_level(current_level + 1)
+
+	while character_data.experience >= xp_required and current_level < 100:
+		character_data.experience -= xp_required
+		current_level += 1
+		character_data.level = current_level
+		character_data.attribute_points = character_data.get("attribute_points", 0) + 3
+
+		print("[Economy] Level up! Now level %d" % current_level)
+		xp_required = _get_xp_for_level(current_level + 1)
+
+	# Save to backend
+	save_character_data()
+
+
+## Calculate XP required for a level
+func _get_xp_for_level(target_level: int) -> int:
+	return int(100 * pow(target_level, 1.5))
+
+
+## Apply character data from backend/cache
+func _apply_character_data(data: Dictionary) -> void:
+	character_data.level = data.get("level", character_data.level)
+	character_data.experience = data.get("experience", character_data.experience)
+	character_data.attribute_points = data.get("attribute_points", character_data.attribute_points)
+	character_data.prestige_level = data.get("prestige_level", character_data.prestige_level)
+	character_data.total_xp = data.get("total_xp", character_data.total_xp)
+
+	if data.has("base_attributes"):
+		character_data.base_attributes = data.base_attributes.duplicate()
+	if data.has("skill_data"):
+		character_data.skill_data = data.skill_data.duplicate()
+
+
+## Merge new data into character data
+func _merge_character_data(data: Dictionary) -> void:
+	for key in data:
+		if key == "base_attributes" and data[key] is Dictionary:
+			for attr in data[key]:
+				character_data.base_attributes[attr] = data[key][attr]
+		elif key == "skill_data" and data[key] is Dictionary:
+			character_data.skill_data = data[key].duplicate()
+		else:
+			character_data[key] = data[key]
+
+
+## Load character data from local cache
+func _load_character_cache() -> void:
+	var config := ConfigFile.new()
+	if config.load(CHARACTER_CACHE_PATH) != OK:
+		return
+
+	# Only load if matching character ID
+	var cached_id := config.get_value("character", "id", "")
+	if cached_id == "" or (character_id != "" and cached_id != character_id):
+		return
+
+	character_data.level = config.get_value("progression", "level", 1)
+	character_data.experience = config.get_value("progression", "experience", 0)
+	character_data.attribute_points = config.get_value("progression", "attribute_points", 5)
+	character_data.prestige_level = config.get_value("progression", "prestige_level", 0)
+	character_data.total_xp = config.get_value("progression", "total_xp", 0)
+
+	var attrs := config.get_value("attributes", "base", {})
+	if not attrs.is_empty():
+		character_data.base_attributes = attrs
+
+	var skills := config.get_value("skills", "data", {})
+	if not skills.is_empty():
+		character_data.skill_data = skills
+
+	print("[Economy] Loaded character cache for %s" % cached_id)
+
+
+## Save character data to local cache
+func _save_character_cache() -> void:
+	var config := ConfigFile.new()
+
+	config.set_value("character", "id", character_id)
+	config.set_value("character", "name", character_name)
+
+	config.set_value("progression", "level", character_data.level)
+	config.set_value("progression", "experience", character_data.experience)
+	config.set_value("progression", "attribute_points", character_data.attribute_points)
+	config.set_value("progression", "prestige_level", character_data.prestige_level)
+	config.set_value("progression", "total_xp", character_data.total_xp)
+
+	config.set_value("attributes", "base", character_data.base_attributes)
+	config.set_value("skills", "data", character_data.skill_data)
+
+	var err := config.save(CHARACTER_CACHE_PATH)
+	if err != OK:
+		push_warning("[Economy] Failed to save character cache: %d" % err)
+
+
+## Get character data for external systems
+func get_character_data() -> Dictionary:
+	return character_data.duplicate(true)
+
+
+## Update attributes (called from CharacterScreen)
+func update_attributes(attributes: Dictionary) -> void:
+	character_data.base_attributes = attributes.duplicate()
+	save_character_data()
+
+
+## Update attribute points
+func set_attribute_points(points: int) -> void:
+	character_data.attribute_points = points
+	save_character_data()
+
+
+## Update skill data (called from CharacterScreen)
+func update_skill_data(skill_data: Dictionary) -> void:
+	character_data.skill_data = skill_data.duplicate()
+	save_character_data()
 
 
 # ============================================

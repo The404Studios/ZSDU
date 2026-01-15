@@ -36,13 +36,20 @@ var total_wave_zombies := 0
 var spawn_timer := 0.0
 var spawn_points: Array[Node3D] = []
 
-# Zombie type distribution
+# Zombie type distribution (base weights, adjusted by wave)
 var zombie_type_weights := {
 	ZombieController.ZombieType.WALKER: 60,
-	ZombieController.ZombieType.RUNNER: 25,
-	ZombieController.ZombieType.BRUTE: 10,
+	ZombieController.ZombieType.RUNNER: 20,
+	ZombieController.ZombieType.BRUTE: 8,
 	ZombieController.ZombieType.CRAWLER: 5,
+	ZombieController.ZombieType.SPITTER: 3,
+	ZombieController.ZombieType.SCREAMER: 2,
+	ZombieController.ZombieType.EXPLODER: 2,
 }
+
+# Boss spawn tracking
+var boss_spawned_this_wave := false
+const BOSS_SPAWN_WAVE_INTERVAL := 5  # Boss every 5 waves
 
 
 func _ready() -> void:
@@ -98,6 +105,10 @@ func _start_next_wave() -> void:
 	zombies_killed = 0
 	wave_active = true
 	spawn_timer = 0.0
+	boss_spawned_this_wave = false
+
+	# Check if this is a boss wave
+	var is_boss_wave := current_wave % BOSS_SPAWN_WAVE_INTERVAL == 0
 
 	# Notify
 	wave_started.emit(current_wave, total_wave_zombies)
@@ -105,10 +116,14 @@ func _start_next_wave() -> void:
 	# Broadcast to clients
 	NetworkManager.broadcast_event.rpc("wave_start", {
 		"wave": current_wave,
-		"zombie_count": total_wave_zombies
+		"zombie_count": total_wave_zombies,
+		"is_boss_wave": is_boss_wave
 	})
 
-	print("[WaveManager] Wave %d started - %d zombies" % [current_wave, total_wave_zombies])
+	if is_boss_wave:
+		print("[WaveManager] BOSS WAVE %d started - %d zombies + BOSS" % [current_wave, total_wave_zombies])
+	else:
+		print("[WaveManager] Wave %d started - %d zombies" % [current_wave, total_wave_zombies])
 
 
 ## End current wave
@@ -190,28 +205,51 @@ func _get_spawn_position() -> Vector3:
 
 ## Determine zombie type based on weights and wave
 func _get_zombie_type() -> ZombieController.ZombieType:
-	# Adjust weights based on wave
+	# Check if should spawn boss (once per boss wave, at 50% progress)
+	var is_boss_wave := current_wave % BOSS_SPAWN_WAVE_INTERVAL == 0
+	if is_boss_wave and not boss_spawned_this_wave:
+		var progress := float(zombies_spawned) / float(total_wave_zombies)
+		if progress >= 0.5:
+			boss_spawned_this_wave = true
+			return ZombieController.ZombieType.BOSS
+
+	# Adjust weights based on wave (more dangerous zombies in later waves)
 	var adjusted_weights := zombie_type_weights.duplicate()
 
-	# More special zombies in later waves
+	# Reduce walkers, increase specials as waves progress
+	var wave_factor := minf(current_wave / 10.0, 1.0)  # 0 to 1 over 10 waves
+	adjusted_weights[ZombieController.ZombieType.WALKER] = int(60 * (1.0 - wave_factor * 0.4))
+	adjusted_weights[ZombieController.ZombieType.RUNNER] = int(20 + wave_factor * 10)
+	adjusted_weights[ZombieController.ZombieType.BRUTE] = int(8 + wave_factor * 7)
+	adjusted_weights[ZombieController.ZombieType.SPITTER] = int(3 + wave_factor * 5)
+	adjusted_weights[ZombieController.ZombieType.SCREAMER] = int(2 + wave_factor * 4)
+	adjusted_weights[ZombieController.ZombieType.EXPLODER] = int(2 + wave_factor * 4)
+
+	# More special zombies chance in later waves
 	var special_chance := special_zombie_chance_base + current_wave * special_zombie_chance_per_wave
 	special_chance = minf(special_chance, 0.5)
 
 	if randf() < special_chance:
-		# Roll for special type
-		var specials := [
+		# Roll for special type (weighted by wave)
+		var specials: Array[ZombieController.ZombieType] = [
 			ZombieController.ZombieType.RUNNER,
 			ZombieController.ZombieType.BRUTE,
 			ZombieController.ZombieType.CRAWLER,
+			ZombieController.ZombieType.SPITTER,
+			ZombieController.ZombieType.SCREAMER,
+			ZombieController.ZombieType.EXPLODER,
 		]
-		return specials[randi() % specials.size()]
+
+		# Later waves can spawn more dangerous specials
+		var max_special_idx := mini(2 + int(current_wave / 3), specials.size() - 1)
+		return specials[randi() % (max_special_idx + 1)]
 
 	# Weighted random for normal distribution
 	var total_weight := 0
 	for type in adjusted_weights:
 		total_weight += adjusted_weights[type]
 
-	var roll := randi() % total_weight
+	var roll := randi() % maxi(total_weight, 1)
 	var cumulative := 0
 
 	for type in adjusted_weights:
@@ -233,6 +271,14 @@ func _type_to_string(type: ZombieController.ZombieType) -> String:
 			return "brute"
 		ZombieController.ZombieType.CRAWLER:
 			return "crawler"
+		ZombieController.ZombieType.SPITTER:
+			return "spitter"
+		ZombieController.ZombieType.SCREAMER:
+			return "screamer"
+		ZombieController.ZombieType.EXPLODER:
+			return "exploder"
+		ZombieController.ZombieType.BOSS:
+			return "boss"
 	return "walker"
 
 

@@ -25,6 +25,10 @@ enum ZombieType {
 	RUNNER,      # Fast, weak
 	BRUTE,       # Slow, tanky, high damage
 	CRAWLER,     # Low, can fit under gaps
+	SPITTER,     # Ranged acid attack
+	SCREAMER,    # Calls more zombies when aggro
+	EXPLODER,    # Explodes on death or when near player
+	BOSS,        # Very tanky boss zombie
 }
 
 # Base stats (modified by type and wave)
@@ -57,13 +61,14 @@ var target_nail_id: int = -1
 var target_position := Vector3.ZERO
 var target_direction := Vector3.FORWARD  # Direction toward sigil
 
-# Navigation (simplified - mostly moves toward sigil)
+# Navigation (navmesh-based pathfinding)
 var nav_agent: NavigationAgent3D = null
 var path_update_timer: float = 0.0
-const PATH_UPDATE_INTERVAL := 0.5  # Don't re-path every frame
+const PATH_UPDATE_INTERVAL := 0.25  # Faster path updates for better responsiveness
 
-# Pressure tube mode - zombies just move forward
-var use_directional_movement := true  # Enable simplified movement
+# Navigation mode
+var use_navmesh_pathfinding := true  # Use navmesh when available
+var nav_path_failed := false  # Fall back to direct movement if navmesh fails
 
 # Attack state
 var attack_timer: float = 0.0
@@ -89,10 +94,18 @@ func _ready() -> void:
 		nav_agent.name = "NavigationAgent3D"
 		add_child(nav_agent)
 
-	# Configure navigation
+	# Configure navigation agent for better pathfinding
 	nav_agent.path_desired_distance = 0.5
 	nav_agent.target_desired_distance = 1.0
 	nav_agent.avoidance_enabled = true
+	nav_agent.radius = 0.35
+	nav_agent.neighbor_distance = 3.0
+	nav_agent.max_neighbors = 5
+	nav_agent.path_max_distance = 50.0  # Re-path if distance changes significantly
+
+	# Connect navigation signals
+	nav_agent.path_changed.connect(_on_nav_path_changed)
+	nav_agent.navigation_finished.connect(_on_nav_finished)
 
 	# Apply type modifiers
 	_apply_type_modifiers()
@@ -143,18 +156,42 @@ func _apply_type_modifiers() -> void:
 			health = BASE_HEALTH
 			move_speed = BASE_SPEED
 			damage = BASE_DAMAGE
+			attack_cooldown = BASE_ATTACK_RATE
 		ZombieType.RUNNER:
 			health = BASE_HEALTH * 0.6
 			move_speed = BASE_SPEED * 2.0
 			damage = BASE_DAMAGE * 0.7
+			attack_cooldown = BASE_ATTACK_RATE * 0.7
 		ZombieType.BRUTE:
 			health = BASE_HEALTH * 3.0
 			move_speed = BASE_SPEED * 0.6
 			damage = BASE_DAMAGE * 2.5
+			attack_cooldown = BASE_ATTACK_RATE * 1.5
 		ZombieType.CRAWLER:
 			health = BASE_HEALTH * 0.8
 			move_speed = BASE_SPEED * 1.2
 			damage = BASE_DAMAGE * 0.8
+			attack_cooldown = BASE_ATTACK_RATE * 0.8
+		ZombieType.SPITTER:
+			health = BASE_HEALTH * 0.7
+			move_speed = BASE_SPEED * 0.9
+			damage = BASE_DAMAGE * 1.2  # Ranged damage
+			attack_cooldown = BASE_ATTACK_RATE * 2.0  # Slower attack
+		ZombieType.SCREAMER:
+			health = BASE_HEALTH * 0.5
+			move_speed = BASE_SPEED * 1.3
+			damage = BASE_DAMAGE * 0.5
+			attack_cooldown = BASE_ATTACK_RATE * 1.0
+		ZombieType.EXPLODER:
+			health = BASE_HEALTH * 0.8
+			move_speed = BASE_SPEED * 1.1
+			damage = BASE_DAMAGE * 3.0  # Explosion damage
+			attack_cooldown = 0.0  # Instant explosion
+		ZombieType.BOSS:
+			health = BASE_HEALTH * 10.0
+			move_speed = BASE_SPEED * 0.5
+			damage = BASE_DAMAGE * 4.0
+			attack_cooldown = BASE_ATTACK_RATE * 0.8
 
 	max_health = health
 
@@ -218,20 +255,24 @@ func _state_aggro(_delta: float) -> void:
 		_change_state(ZombieState.IDLE)
 		return
 
+	# Screamer special: call for help when first aggroed
+	if zombie_type == ZombieType.SCREAMER and state_timer < 0.1:
+		_scream_for_help()
+
 	target_position = target_player.global_position
 	_change_state(ZombieState.PATH)
 
 
-## PATH - Move toward target (simplified directional movement)
+## PATH - Move toward target using navmesh pathfinding with barricade awareness
 func _state_path(delta: float) -> void:
-	# Always check for nearby nails (barricade detection)
+	# Priority 1: Check for nearby nails to attack (immediate barricade threat)
 	var nearby_nail := GameState.get_nearest_nail(global_position, 2.5)
 	if nearby_nail >= 0:
 		target_nail_id = nearby_nail
 		_change_state(ZombieState.ATTACK_NAIL)
 		return
 
-	# Check for blocking barricades via raycast (less frequently)
+	# Priority 2: Check for blocking barricades via raycast (periodic check)
 	if path_update_timer >= PATH_UPDATE_INTERVAL:
 		path_update_timer = 0.0
 
@@ -241,7 +282,7 @@ func _state_path(delta: float) -> void:
 			_change_state(ZombieState.ATTACK_NAIL)
 			return
 
-		# Check if player is nearby and closer than sigil
+		# Check if player is nearby and should chase
 		_find_target()
 		if target_player:
 			var player_dist := global_position.distance_to(target_player.global_position)
@@ -249,23 +290,12 @@ func _state_path(delta: float) -> void:
 				_change_state(ZombieState.AGGRO)
 				return
 
-	# Use directional movement (pressure tube model)
-	var direction: Vector3
-	if use_directional_movement:
-		# Just move toward target (sigil)
-		direction = global_position.direction_to(target_position)
-		direction.y = 0
-		direction = direction.normalized()
-	else:
-		# Use navmesh if available
-		if nav_agent:
+		# Update navmesh target if using navmesh
+		if use_navmesh_pathfinding and nav_agent:
 			nav_agent.target_position = target_position
-			var next_pos := nav_agent.get_next_path_position()
-			direction = global_position.direction_to(next_pos)
-			direction.y = 0
-			direction = direction.normalized()
-		else:
-			direction = target_direction
+
+	# Calculate movement direction
+	var direction := _get_movement_direction()
 
 	# Check if reached target (sigil area)
 	var dist_to_target := global_position.distance_to(target_position)
@@ -275,17 +305,60 @@ func _state_path(delta: float) -> void:
 		velocity.z = 0
 		return
 
-	# Apply group offset if following leader
+	# Apply group offset if following leader (horde behavior)
 	if group_leader and is_instance_valid(group_leader):
 		direction = (direction + group_offset * 0.3).normalized()
 
 	velocity.x = direction.x * move_speed
 	velocity.z = direction.z * move_speed
 
-	# Face movement direction
+	# Face movement direction smoothly
 	if direction.length() > 0.1:
 		var target_angle := atan2(direction.x, direction.z)
 		rotation.y = lerp_angle(rotation.y, target_angle, 10.0 * delta)
+
+
+## Get movement direction using navmesh or fallback to direct movement
+func _get_movement_direction() -> Vector3:
+	var direction: Vector3
+
+	# Try navmesh pathfinding first
+	if use_navmesh_pathfinding and nav_agent and not nav_path_failed:
+		if nav_agent.is_navigation_finished():
+			# Reached target via navmesh
+			return Vector3.ZERO
+
+		var next_pos := nav_agent.get_next_path_position()
+		direction = global_position.direction_to(next_pos)
+		direction.y = 0
+
+		# Check if we're stuck (velocity is very low but not at target)
+		if direction.length() < 0.01:
+			# Navmesh might be blocked, use direct movement temporarily
+			nav_path_failed = true
+			direction = global_position.direction_to(target_position)
+			direction.y = 0
+	else:
+		# Direct movement toward target (fallback)
+		direction = global_position.direction_to(target_position)
+		direction.y = 0
+
+		# Reset navmesh failure after a short delay
+		if nav_path_failed:
+			nav_path_failed = false
+
+	return direction.normalized() if direction.length() > 0.01 else Vector3.ZERO
+
+
+## Called when navigation path changes
+func _on_nav_path_changed() -> void:
+	nav_path_failed = false  # New path available, reset failure flag
+
+
+## Called when navigation target is reached
+func _on_nav_finished() -> void:
+	# At destination - could transition to attack or idle
+	pass
 
 
 ## ATTACK_PLAYER - Melee attack player
@@ -497,12 +570,131 @@ func _die() -> void:
 	current_state = ZombieState.DEAD
 	health = 0
 
+	# Special death behaviors
+	match zombie_type:
+		ZombieType.EXPLODER:
+			_explode_on_death()
+		ZombieType.SCREAMER:
+			# Already called zombies when aggroed
+			pass
+
+	# Drop loot
+	_drop_loot()
+
 	# Notify game state
 	GameState.kill_zombie(zombie_id)
 
 	# Play death animation, then remove
 	# For now, just queue free
 	queue_free()
+
+
+## Exploder special: explodes on death dealing AoE damage
+func _explode_on_death() -> void:
+	var explosion_radius := 4.0
+	var explosion_damage := damage  # Uses exploder's damage stat
+
+	# Find all players and zombies in radius
+	for peer_id in GameState.players:
+		var player: Node3D = GameState.players[peer_id]
+		if not is_instance_valid(player):
+			continue
+
+		var dist := global_position.distance_to(player.global_position)
+		if dist < explosion_radius:
+			# Damage falls off with distance
+			var falloff := 1.0 - (dist / explosion_radius)
+			var actual_damage := explosion_damage * falloff
+			if player.has_method("take_damage"):
+				player.take_damage(actual_damage, global_position)
+
+	# Broadcast explosion event for VFX
+	NetworkManager.broadcast_event.rpc("zombie_explode", {
+		"position": global_position,
+		"radius": explosion_radius
+	})
+
+
+## Screamer special: call nearby zombies to converge on player
+func _scream_for_help() -> void:
+	if not target_player:
+		return
+
+	var scream_radius := 20.0
+	var player_pos := target_player.global_position
+
+	# All zombies in radius target this player
+	for zid in GameState.zombies:
+		var zombie: ZombieController = GameState.zombies[zid]
+		if not is_instance_valid(zombie):
+			continue
+		if zombie == self:
+			continue
+
+		var dist := global_position.distance_to(zombie.global_position)
+		if dist < scream_radius:
+			zombie.target_player = target_player
+			zombie.target_position = player_pos
+			zombie._change_state(ZombieState.AGGRO)
+
+	# Broadcast scream event for audio
+	NetworkManager.broadcast_event.rpc("zombie_scream", {
+		"position": global_position
+	})
+
+
+## Drop loot on death
+func _drop_loot() -> void:
+	if not NetworkManager.is_authority():
+		return
+
+	# Calculate loot chance based on zombie type
+	var loot_chance := 0.1  # Base 10% chance
+	var gold_amount := 0
+	var xp_amount := 10
+
+	match zombie_type:
+		ZombieType.WALKER:
+			loot_chance = 0.08
+			gold_amount = randi_range(5, 15)
+			xp_amount = 10
+		ZombieType.RUNNER:
+			loot_chance = 0.10
+			gold_amount = randi_range(8, 20)
+			xp_amount = 15
+		ZombieType.BRUTE:
+			loot_chance = 0.25
+			gold_amount = randi_range(20, 50)
+			xp_amount = 35
+		ZombieType.CRAWLER:
+			loot_chance = 0.12
+			gold_amount = randi_range(10, 25)
+			xp_amount = 12
+		ZombieType.SPITTER:
+			loot_chance = 0.18
+			gold_amount = randi_range(15, 35)
+			xp_amount = 25
+		ZombieType.SCREAMER:
+			loot_chance = 0.20
+			gold_amount = randi_range(12, 30)
+			xp_amount = 20
+		ZombieType.EXPLODER:
+			loot_chance = 0.15
+			gold_amount = randi_range(18, 40)
+			xp_amount = 30
+		ZombieType.BOSS:
+			loot_chance = 1.0  # Always drop loot
+			gold_amount = randi_range(100, 250)
+			xp_amount = 150
+
+	# Broadcast loot drop event (handled by game world)
+	NetworkManager.broadcast_event.rpc("zombie_loot", {
+		"position": global_position,
+		"gold": gold_amount,
+		"xp": xp_amount,
+		"drop_item": randf() < loot_chance,
+		"zombie_type": zombie_type
+	})
 
 
 ## Get network state for snapshot
@@ -542,6 +734,10 @@ static func string_to_type(type_str: String) -> ZombieType:
 		"runner": return ZombieType.RUNNER
 		"brute": return ZombieType.BRUTE
 		"crawler": return ZombieType.CRAWLER
+		"spitter": return ZombieType.SPITTER
+		"screamer": return ZombieType.SCREAMER
+		"exploder": return ZombieType.EXPLODER
+		"boss": return ZombieType.BOSS
 	return ZombieType.WALKER
 
 

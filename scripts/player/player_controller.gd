@@ -44,6 +44,7 @@ var animation_controller: AnimationController = null
 var inventory_runtime: InventoryRuntime = null
 var equipment_runtime: EquipmentRuntime = null
 var attribute_system: AttributeSystem = null
+var skill_system: SkillSystem = null
 var network_controller: PlayerNetworkController = null
 
 # Prop handler (for barricade system)
@@ -94,9 +95,14 @@ func _setup_controllers() -> void:
 
 	# Attribute System (STR, AGI, END, INT, LCK)
 	attribute_system = AttributeSystem.new()
-	attribute_system.setup_default()
+	_load_character_progression()  # Load from saved data instead of defaults
 	attribute_system.derived_stats_updated.connect(_on_derived_stats_updated)
 	attribute_system.level_up.connect(_on_level_up)
+
+	# Skill System (passive skill bonuses)
+	skill_system = SkillSystem.new()
+	_load_skill_progression()  # Load from saved data
+	skill_system.skill_upgraded.connect(_on_skill_upgraded)
 
 	# Combat Controller
 	combat_controller = CombatController.new()
@@ -131,6 +137,13 @@ func _setup_local_player() -> void:
 		add_child(prop_handler)
 		prop_handler.initialize(self)
 
+		# Connect prop handler to movement controller for carry penalties
+		if movement_controller:
+			movement_controller.prop_handler = prop_handler
+
+		# Initialize hammer (all players spawn with hammer for barricading)
+		_setup_hammer()
+
 		# Initialize weapon manager (attached to camera pivot for first-person view)
 		weapon_manager = WeaponManager.new()
 		weapon_manager.name = "WeaponManager"
@@ -151,6 +164,25 @@ func _register_raid_with_server() -> void:
 	# Called by client to send their raid info to server
 	if RaidManager:
 		RaidManager.client_register_raid()
+
+
+## Setup hammer tool (all players spawn with one)
+func _setup_hammer() -> void:
+	var HammerScript: GDScript = null
+	if ResourceLoader.exists("res://scripts/weapons/hammer.gd"):
+		HammerScript = load("res://scripts/weapons/hammer.gd")
+
+	if HammerScript:
+		var hammer: Hammer = HammerScript.new()
+		hammer.name = "Hammer"
+		add_child(hammer)
+		hammer.initialize(self)
+
+		# Store reference using meta for input handling
+		set_meta("hammer", hammer)
+		print("[Player] Hammer equipped")
+	else:
+		push_warning("[Player] Hammer script not found")
 
 
 ## Setup visual weapons from inventory runtime
@@ -214,6 +246,10 @@ func _input(event: InputEvent) -> void:
 func _physics_process(delta: float) -> void:
 	if is_dead:
 		return
+
+	# Health regeneration (server-authoritative)
+	if NetworkManager and NetworkManager.is_authority():
+		_process_health_regen(delta)
 
 	# Network controller handles all the tick logic based on authority
 	# Movement and combat are processed there
@@ -384,6 +420,28 @@ func request_extract() -> void:
 		RaidManager.client_request_extract()
 
 
+## Process health regeneration (server-side)
+func _process_health_regen(delta: float) -> void:
+	if health >= max_health:
+		return
+
+	# Get total health regen from all sources
+	var health_regen := 0.0
+
+	# From equipment
+	if equipment_runtime:
+		health_regen += equipment_runtime.get_stat("health_regen")
+
+	# From attributes (endurance gives +0.1 HP/sec per point above base)
+	if attribute_system:
+		var derived := attribute_system.get_derived_stats()
+		health_regen += derived.get("health_regen", 0.0)
+
+	# Apply regeneration
+	if health_regen > 0:
+		health = minf(health + health_regen * delta, max_health)
+
+
 # ============================================
 # SIGNAL HANDLERS
 # ============================================
@@ -460,31 +518,71 @@ func get_attribute_system() -> AttributeSystem:
 # ============================================
 
 func _on_derived_stats_updated(stats: Dictionary) -> void:
-	# Update max health from endurance
-	max_health = stats.get("max_health", 100.0)
+	# Get skill bonuses
+	var skill_bonuses: Dictionary = {}
+	if skill_system:
+		skill_bonuses = skill_system.get_stat_bonuses()
+
+	# Update max health from endurance + skills
+	var base_max_health: float = stats.get("max_health", 100.0)
+	var health_mult: float = skill_bonuses.get("health_mult", 1.0)
+	max_health = base_max_health * health_mult
 
 	# Cap current health to new max
 	if health > max_health:
 		health = max_health
 
-	# Update movement controller with attribute multipliers
+	# Update movement controller with attribute + skill multipliers
 	if movement_controller:
-		movement_controller.attribute_move_speed_mult = stats.get("move_speed_mult", 1.0)
-		movement_controller.attribute_sprint_speed_mult = stats.get("sprint_speed_mult", 1.0)
-		movement_controller.attribute_stamina_regen_mult = stats.get("stamina_regen_mult", 1.0)
-		movement_controller.max_stamina = stats.get("max_stamina", 100.0)
+		var move_mult: float = stats.get("move_speed_mult", 1.0) * skill_bonuses.get("move_speed_mult", 1.0)
+		var sprint_mult: float = stats.get("sprint_speed_mult", 1.0) * skill_bonuses.get("sprint_mult", 1.0)
+		var stamina_regen_mult: float = stats.get("stamina_regen_mult", 1.0) * skill_bonuses.get("stamina_regen_mult", 1.0)
+		var stamina_mult: float = skill_bonuses.get("stamina_mult", 1.0)
 
-	# Update combat controller with attribute multipliers
+		movement_controller.attribute_move_speed_mult = move_mult
+		movement_controller.attribute_sprint_speed_mult = sprint_mult
+		movement_controller.attribute_stamina_regen_mult = stamina_regen_mult
+		movement_controller.max_stamina = stats.get("max_stamina", 100.0) * stamina_mult
+
+	# Update combat controller with attribute + skill multipliers
 	if combat_controller:
-		combat_controller.attribute_reload_speed_mult = stats.get("reload_speed_mult", 1.0)
-		combat_controller.attribute_ads_speed_mult = stats.get("ads_speed_mult", 1.0)
-		combat_controller.attribute_crit_chance = stats.get("crit_chance", 0.05)
-		combat_controller.attribute_crit_damage_mult = stats.get("crit_damage_mult", 1.5)
+		var reload_mult: float = stats.get("reload_speed_mult", 1.0) * skill_bonuses.get("reload_speed_mult", 1.0)
+		var ads_mult: float = stats.get("ads_speed_mult", 1.0) * skill_bonuses.get("ads_speed_mult", 1.0)
+		var crit_chance: float = stats.get("crit_chance", 0.05) + skill_bonuses.get("crit_chance", 0.0)
+		var crit_damage: float = stats.get("crit_damage_mult", 1.5) + (skill_bonuses.get("crit_damage", 1.5) - 1.5)
+
+		combat_controller.attribute_reload_speed_mult = reload_mult
+		combat_controller.attribute_ads_speed_mult = ads_mult
+		combat_controller.attribute_crit_chance = crit_chance
+		combat_controller.attribute_crit_damage_mult = crit_damage
+
+		# Additional skill bonuses for combat
+		combat_controller.skill_damage_mult = skill_bonuses.get("damage_mult", 1.0)
+		combat_controller.skill_fire_rate_mult = skill_bonuses.get("fire_rate_mult", 1.0)
+		combat_controller.skill_accuracy_mult = skill_bonuses.get("accuracy_mult", 1.0)
+		combat_controller.skill_recoil_mult = skill_bonuses.get("recoil_mult", 1.0)
 
 
 func _on_level_up(new_level: int, attribute_points: int) -> void:
 	print("[Player] Leveled up to %d! (%d attribute points available)" % [new_level, attribute_points])
-	# TODO: Show level up UI/effects
+
+	# Show level up in HUD
+	var hud := _find_fps_hud()
+	if hud and hud.has_method("show_level_up"):
+		hud.show_level_up(new_level, attribute_points)
+
+	# Save progression
+	if EconomyService and EconomyService.is_logged_in:
+		EconomyService.save_character_data()
+
+
+func _find_fps_hud() -> FpsHud:
+	# Look in game world for HUD
+	if GameState and GameState.world_node:
+		var hud := GameState.world_node.get_node_or_null("FpsHud")
+		if hud is FpsHud:
+			return hud as FpsHud
+	return null
 
 
 func _on_equipment_stats_updated(total_stats: Dictionary) -> void:
@@ -496,3 +594,97 @@ func _on_equipment_stats_updated(total_stats: Dictionary) -> void:
 	if movement_controller:
 		movement_controller.equipment_speed_modifier = total_stats.get("speed_modifier", 1.0)
 		movement_controller.equipment_stamina_modifier = total_stats.get("stamina_modifier", 1.0)
+
+
+## Load character progression data from EconomyService
+func _load_character_progression() -> void:
+	if not attribute_system:
+		return
+
+	# Try to load from EconomyService (if logged in)
+	if EconomyService and EconomyService.is_logged_in:
+		var saved_data: Dictionary = EconomyService.get_character_data()
+
+		# Load level and XP
+		attribute_system.level = saved_data.get("level", 1)
+		attribute_system.experience = saved_data.get("experience", 0)
+		attribute_system.attribute_points = saved_data.get("attribute_points", 5)
+
+		# Load base attributes
+		var base_attrs: Dictionary = saved_data.get("base_attributes", {})
+		if not base_attrs.is_empty():
+			for attr_name in base_attrs:
+				var attr_enum := _attr_name_to_enum(attr_name)
+				if attr_enum >= 0:
+					attribute_system.base_attributes[attr_enum] = base_attrs[attr_name]
+
+		attribute_system._recalculate_derived_stats()
+		print("[Player] Loaded character progression: Level %d, XP %d" % [
+			attribute_system.level,
+			attribute_system.experience
+		])
+	else:
+		# No saved data - use defaults
+		attribute_system.setup_default()
+
+
+## Convert attribute name string to enum
+func _attr_name_to_enum(name: String) -> int:
+	match name.to_lower():
+		"strength": return AttributeSystem.Attribute.STRENGTH
+		"agility": return AttributeSystem.Attribute.AGILITY
+		"endurance": return AttributeSystem.Attribute.ENDURANCE
+		"intellect": return AttributeSystem.Attribute.INTELLECT
+		"luck": return AttributeSystem.Attribute.LUCK
+	return -1
+
+
+## Grant XP to player (called after kills, objectives, etc.)
+func grant_xp(amount: int) -> void:
+	if attribute_system:
+		attribute_system.add_experience(amount)
+
+	# Also add XP to skill system for skill points
+	if skill_system:
+		skill_system.add_xp(amount)
+
+	# Also persist to EconomyService
+	if EconomyService and EconomyService.is_logged_in:
+		EconomyService.add_experience(amount)
+
+
+## Load skill progression data from EconomyService
+func _load_skill_progression() -> void:
+	if not skill_system:
+		return
+
+	# Try to load from EconomyService (if logged in)
+	if EconomyService and EconomyService.is_logged_in:
+		var saved_data: Dictionary = EconomyService.get_character_data()
+		var skill_data: Dictionary = saved_data.get("skill_data", {})
+
+		if not skill_data.is_empty():
+			skill_system.load_save_data(skill_data)
+			print("[Player] Loaded skill progression: %d skill points, prestige %d" % [
+				skill_system.skill_points,
+				skill_system.prestige_level
+			])
+
+
+## Called when a skill is upgraded
+func _on_skill_upgraded(_category: String, skill_id: String, new_level: int) -> void:
+	print("[Player] Skill '%s' upgraded to level %d" % [skill_id, new_level])
+
+	# Recalculate derived stats with new skill bonuses
+	if attribute_system:
+		attribute_system._recalculate_derived_stats()
+
+	# Save progression
+	if EconomyService and EconomyService.is_logged_in:
+		var skill_data := skill_system.get_save_data() if skill_system else {}
+		EconomyService.save_character_data({"skill_data": skill_data})
+
+
+## Get the skill system
+func get_skill_system() -> SkillSystem:
+	return skill_system
