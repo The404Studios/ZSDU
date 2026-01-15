@@ -510,7 +510,24 @@ func _on_derived_stats_updated(stats: Dictionary) -> void:
 
 func _on_level_up(new_level: int, attribute_points: int) -> void:
 	print("[Player] Leveled up to %d! (%d attribute points available)" % [new_level, attribute_points])
-	# TODO: Show level up UI/effects
+
+	# Show level up in HUD
+	var hud := _find_fps_hud()
+	if hud and hud.has_method("show_level_up"):
+		hud.show_level_up(new_level, attribute_points)
+
+	# Save progression
+	if EconomyService and EconomyService.is_logged_in:
+		EconomyService.save_character_data()
+
+
+func _find_fps_hud() -> FpsHud:
+	# Look in game world for HUD
+	if GameState and GameState.world_node:
+		var hud := GameState.world_node.get_node_or_null("FpsHud")
+		if hud is FpsHud:
+			return hud as FpsHud
+	return null
 
 
 func _on_equipment_stats_updated(total_stats: Dictionary) -> void:

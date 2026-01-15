@@ -805,3 +805,78 @@ func _update_xp_popups(delta: float) -> void:
 		if popup.lifetime >= popup.max_lifetime:
 			label.queue_free()
 			xp_popups.remove_at(i)
+
+
+# ============================================
+# LEVEL UP DISPLAY
+# ============================================
+
+func show_level_up(new_level: int, attribute_points: int) -> void:
+	# Create dramatic level up display
+	var level_popup := Control.new()
+	level_popup.set_anchors_preset(Control.PRESET_CENTER)
+	level_popup.position = Vector2(-150, -50)
+	level_popup.size = Vector2(300, 100)
+	level_popup.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(level_popup)
+
+	# Background
+	var bg := ColorRect.new()
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bg.color = Color(0.1, 0.1, 0.15, 0.9)
+	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	level_popup.add_child(bg)
+
+	# Border
+	var border := ColorRect.new()
+	border.set_anchors_preset(Control.PRESET_FULL_RECT)
+	border.position = Vector2(-3, -3)
+	border.size = Vector2(306, 106)
+	border.color = Color(0.9, 0.8, 0.2, 0.8)  # Gold border
+	border.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	border.z_index = -1
+	level_popup.add_child(border)
+
+	# LEVEL UP text
+	var title := Label.new()
+	title.text = "LEVEL UP!"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	title.position.y = 10
+	title.add_theme_font_size_override("font_size", 28)
+	title.add_theme_color_override("font_color", Color(0.9, 0.8, 0.2))  # Gold
+	title.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	level_popup.add_child(title)
+
+	# Level number
+	var level_label := Label.new()
+	level_label.text = "Level %d" % new_level
+	level_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	level_label.set_anchors_preset(Control.PRESET_CENTER)
+	level_label.position.y = 5
+	level_label.add_theme_font_size_override("font_size", 20)
+	level_label.add_theme_color_override("font_color", Color.WHITE)
+	level_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	level_popup.add_child(level_label)
+
+	# Attribute points
+	var points_label := Label.new()
+	points_label.text = "+%d Attribute Points" % 3  # POINTS_PER_LEVEL
+	points_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	points_label.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	points_label.position.y = -30
+	points_label.add_theme_font_size_override("font_size", 14)
+	points_label.add_theme_color_override("font_color", Color(0.7, 0.7, 0.75))
+	points_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	level_popup.add_child(points_label)
+
+	# Animate scale in
+	level_popup.scale = Vector2(0.5, 0.5)
+	level_popup.pivot_offset = level_popup.size / 2
+
+	var tween := create_tween()
+	tween.tween_property(level_popup, "scale", Vector2(1.1, 1.1), 0.15).set_ease(Tween.EASE_OUT)
+	tween.tween_property(level_popup, "scale", Vector2(1.0, 1.0), 0.1)
+	tween.tween_interval(2.0)  # Hold for 2 seconds
+	tween.tween_property(level_popup, "modulate:a", 0.0, 0.5)
+	tween.tween_callback(level_popup.queue_free)
