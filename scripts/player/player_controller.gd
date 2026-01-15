@@ -87,6 +87,10 @@ func _setup_controllers() -> void:
 
 	# Equipment Runtime (armor, rig, accessories)
 	equipment_runtime = EquipmentRuntime.new()
+	equipment_runtime.stats_updated.connect(_on_equipment_stats_updated)
+
+	# Connect equipment capacity to inventory
+	inventory_runtime.update_capacity_from_equipment(equipment_runtime)
 
 	# Attribute System (STR, AGI, END, INT, LCK)
 	attribute_system = AttributeSystem.new()
@@ -481,3 +485,14 @@ func _on_derived_stats_updated(stats: Dictionary) -> void:
 func _on_level_up(new_level: int, attribute_points: int) -> void:
 	print("[Player] Leveled up to %d! (%d attribute points available)" % [new_level, attribute_points])
 	# TODO: Show level up UI/effects
+
+
+func _on_equipment_stats_updated(total_stats: Dictionary) -> void:
+	# Update inventory capacity
+	if inventory_runtime:
+		inventory_runtime.update_capacity_from_equipment(equipment_runtime)
+
+	# Update movement speed modifier
+	if movement_controller:
+		movement_controller.equipment_speed_modifier = total_stats.get("speed_modifier", 1.0)
+		movement_controller.equipment_stamina_modifier = total_stats.get("stamina_modifier", 1.0)

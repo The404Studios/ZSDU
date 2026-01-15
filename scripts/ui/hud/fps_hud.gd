@@ -67,6 +67,9 @@ var current_weapon_name := "VECTOR"
 # Buff tracking
 var active_buffs: Array[Dictionary] = []
 
+# Connection tracking
+var _connected_player: PlayerController = null
+
 
 func _ready() -> void:
 	layer = 10
@@ -77,6 +80,7 @@ func _process(delta: float) -> void:
 	_update_smooth_bars(delta)
 	_update_vignette(delta)
 	_update_from_player()
+	_update_buffs()
 
 
 # ============================================
@@ -512,6 +516,12 @@ func _update_from_player() -> void:
 
 
 func _sync_from_player(player: PlayerController) -> void:
+	# One-time connection to player's systems
+	if _connected_player != player:
+		_connected_player = player
+		if player.attribute_system:
+			connect_to_attribute_system(player.attribute_system)
+
 	# Health
 	if current_health != player.health or max_health != player.max_health:
 		set_health(player.health, player.max_health)
@@ -550,7 +560,7 @@ func set_health(current: float, max_val: float) -> void:
 	# Update HP bar color based on health
 	var fill_style := hp_bar.get_theme_stylebox("fill") as StyleBoxFlat
 	if fill_style:
-		var percent := current / max_val if max_val > 0 else 0
+		var percent: float = current / max_val if max_val > 0 else 0.0
 		if percent <= 0.2:
 			fill_style.bg_color = Color(0.9, 0.2, 0.2)
 		elif percent <= 0.5:
@@ -653,3 +663,54 @@ func expand_crosshair(amount: float = 1.0) -> void:
 
 		tween.tween_property(line, "position", line.position + direction, 0.03)
 		tween.tween_property(line, "position", line.position, 0.15)
+
+
+## Connect to player's attribute system for buff display
+func connect_to_attribute_system(attr_sys: AttributeSystem) -> void:
+	if attr_sys:
+		attr_sys.buff_applied.connect(_on_attribute_buff_applied)
+		attr_sys.buff_expired.connect(_on_attribute_buff_expired)
+
+
+func _on_attribute_buff_applied(buff_id: String, attribute: String, _amount: int) -> void:
+	# Map attribute to color
+	var color := Color(0.3, 0.8, 0.3)  # Default green
+	match attribute:
+		"Strength":
+			color = Color(0.9, 0.3, 0.3)  # Red
+		"Agility":
+			color = Color(0.3, 0.9, 0.3)  # Green
+		"Endurance":
+			color = Color(0.9, 0.6, 0.2)  # Orange
+		"Intellect":
+			color = Color(0.3, 0.5, 0.9)  # Blue
+		"Luck":
+			color = Color(0.9, 0.8, 0.2)  # Gold
+
+	add_buff(buff_id, color, 30.0)  # Default 30s display
+
+
+func _on_attribute_buff_expired(buff_id: String) -> void:
+	remove_buff(buff_id)
+
+
+func remove_buff(buff_id: String) -> void:
+	for i in range(active_buffs.size() - 1, -1, -1):
+		if active_buffs[i].id == buff_id:
+			active_buffs.remove_at(i)
+			break
+	_update_buff_visuals()
+
+
+## Update buff timers (called each frame to expire old buffs)
+func _update_buffs() -> void:
+	var current_time := Time.get_ticks_msec() / 1000.0
+	var changed := false
+
+	for i in range(active_buffs.size() - 1, -1, -1):
+		if active_buffs[i].expires <= current_time:
+			active_buffs.remove_at(i)
+			changed = true
+
+	if changed:
+		_update_buff_visuals()

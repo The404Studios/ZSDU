@@ -36,7 +36,8 @@ const NAIL_DISTANCE := 3.0
 
 # Rate limiting
 var last_action_time := 0.0
-const ACTION_COOLDOWN := 0.1
+const BASE_ACTION_COOLDOWN := 0.1
+const BASE_NAIL_COOLDOWN := 0.25
 
 
 func _ready() -> void:
@@ -122,7 +123,7 @@ func handle_primary_action() -> void:
 	if not is_holding:
 		return
 
-	if not _can_act():
+	if not _can_act(true):  # true = nail action, use barricade_speed modifier
 		return
 
 	# Try to nail the held prop
@@ -142,9 +143,20 @@ func handle_secondary_action() -> void:
 	_request_throw()
 
 
-func _can_act() -> bool:
+func _can_act(is_nail_action: bool = false) -> bool:
 	var current_time := Time.get_ticks_msec() / 1000.0
-	if current_time - last_action_time < ACTION_COOLDOWN:
+
+	# Get base cooldown
+	var base_cd := BASE_NAIL_COOLDOWN if is_nail_action else BASE_ACTION_COOLDOWN
+
+	# Apply barricade_speed modifier from equipment (faster = shorter cooldown)
+	var cooldown := base_cd
+	if owner_player and owner_player.equipment_runtime:
+		var barricade_speed: float = owner_player.equipment_runtime.get_stat("barricade_speed")
+		if barricade_speed > 0:
+			cooldown = base_cd / barricade_speed  # 1.25x speed = 0.8x cooldown
+
+	if current_time - last_action_time < cooldown:
 		return false
 	last_action_time = current_time
 	return true
