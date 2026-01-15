@@ -72,7 +72,7 @@ func _init() -> void:
 
 
 func _initialize_skills() -> void:
-	# Initialize all skill categories
+	# Initialize all skill categories with expanded skill trees
 	skills = {
 		Category.OFFENSE: {
 			"damage_boost": 0,
@@ -81,6 +81,8 @@ func _initialize_skills() -> void:
 			"penetration": 0,
 			"fire_rate": 0,
 			"reload_speed": 0,
+			"headshot_damage": 0,
+			"explosive_damage": 0,
 		},
 		Category.DEFENSE: {
 			"health_boost": 0,
@@ -89,6 +91,8 @@ func _initialize_skills() -> void:
 			"bleed_resistance": 0,
 			"stagger_resistance": 0,
 			"regeneration": 0,
+			"shield_capacity": 0,
+			"death_defiance": 0,
 		},
 		Category.HANDLING: {
 			"accuracy": 0,
@@ -97,6 +101,8 @@ func _initialize_skills() -> void:
 			"aim_stability": 0,
 			"movement_accuracy": 0,
 			"quick_scope": 0,
+			"hip_fire": 0,
+			"weapon_handling": 0,
 		},
 		Category.CONDITIONING: {
 			"stamina_boost": 0,
@@ -105,6 +111,8 @@ func _initialize_skills() -> void:
 			"sprint_duration": 0,
 			"jump_height": 0,
 			"noise_reduction": 0,
+			"fall_damage": 0,
+			"carry_capacity": 0,
 		}
 	}
 
@@ -287,6 +295,8 @@ func get_stat_bonuses() -> Dictionary:
 	bonuses["armor_pen"] = get_skill_level(Category.OFFENSE, "penetration") * 0.03
 	bonuses["fire_rate_mult"] = 1.0 + get_skill_level(Category.OFFENSE, "fire_rate") * 0.03
 	bonuses["reload_speed_mult"] = 1.0 + get_skill_level(Category.OFFENSE, "reload_speed") * 0.05
+	bonuses["headshot_damage_mult"] = 1.0 + get_skill_level(Category.OFFENSE, "headshot_damage") * 0.04
+	bonuses["explosive_damage_mult"] = 1.0 + get_skill_level(Category.OFFENSE, "explosive_damage") * 0.06
 
 	# Defense bonuses
 	bonuses["health_mult"] = 1.0 + get_skill_level(Category.DEFENSE, "health_boost") * 0.05
@@ -295,6 +305,8 @@ func get_stat_bonuses() -> Dictionary:
 	bonuses["bleed_resist"] = get_skill_level(Category.DEFENSE, "bleed_resistance") * 0.1
 	bonuses["stagger_resist"] = get_skill_level(Category.DEFENSE, "stagger_resistance") * 0.1
 	bonuses["health_regen"] = get_skill_level(Category.DEFENSE, "regeneration") * 0.5
+	bonuses["shield_mult"] = 1.0 + get_skill_level(Category.DEFENSE, "shield_capacity") * 0.08
+	bonuses["death_defiance_chance"] = get_skill_level(Category.DEFENSE, "death_defiance") * 0.02
 
 	# Handling bonuses
 	bonuses["accuracy_mult"] = 1.0 + get_skill_level(Category.HANDLING, "accuracy") * 0.05
@@ -303,6 +315,8 @@ func get_stat_bonuses() -> Dictionary:
 	bonuses["aim_stability"] = get_skill_level(Category.HANDLING, "aim_stability") * 0.05
 	bonuses["move_accuracy"] = get_skill_level(Category.HANDLING, "movement_accuracy") * 0.05
 	bonuses["ads_speed_mult"] = 1.0 + get_skill_level(Category.HANDLING, "quick_scope") * 0.1
+	bonuses["hip_fire_accuracy"] = 1.0 + get_skill_level(Category.HANDLING, "hip_fire") * 0.04
+	bonuses["handling_mult"] = 1.0 + get_skill_level(Category.HANDLING, "weapon_handling") * 0.03
 
 	# Conditioning bonuses
 	bonuses["stamina_mult"] = 1.0 + get_skill_level(Category.CONDITIONING, "stamina_boost") * 0.05
@@ -311,6 +325,8 @@ func get_stat_bonuses() -> Dictionary:
 	bonuses["sprint_mult"] = 1.0 + get_skill_level(Category.CONDITIONING, "sprint_duration") * 0.05
 	bonuses["jump_mult"] = 1.0 + get_skill_level(Category.CONDITIONING, "jump_height") * 0.03
 	bonuses["noise_mult"] = 1.0 - get_skill_level(Category.CONDITIONING, "noise_reduction") * 0.05
+	bonuses["fall_damage_mult"] = 1.0 - get_skill_level(Category.CONDITIONING, "fall_damage") * 0.08
+	bonuses["carry_mult"] = 1.0 + get_skill_level(Category.CONDITIONING, "carry_capacity") * 0.05
 
 	# Prestige bonuses (small permanent bonuses)
 	bonuses["prestige_damage"] = prestige_level * 0.02
