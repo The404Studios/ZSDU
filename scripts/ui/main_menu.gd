@@ -76,7 +76,11 @@ func _ready() -> void:
 	_create_play_menu()
 	_create_direct_connect_menu()
 	_create_login_panel()
+	_create_settings_panel()
 	_create_status_bar()
+
+	# Apply saved settings on startup
+	_apply_saved_settings()
 
 	# Connect network signals
 	if NetworkManager:
@@ -204,6 +208,184 @@ func _create_main_menu() -> void:
 	settings_button = _create_menu_button("SETTINGS", Color(0.5, 0.5, 0.5))
 	settings_button.pressed.connect(_on_settings_pressed)
 	inner_vbox.add_child(settings_button)
+
+
+func _create_settings_panel() -> void:
+	settings_panel = PanelContainer.new()
+	settings_panel.name = "SettingsPanel"
+	settings_panel.set_anchors_preset(Control.PRESET_CENTER)
+	settings_panel.custom_minimum_size = Vector2(500, 550)
+	settings_panel.position = Vector2(-250, -225)
+	settings_panel.visible = false
+	add_child(settings_panel)
+
+	var margin := MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 25)
+	margin.add_theme_constant_override("margin_right", 25)
+	margin.add_theme_constant_override("margin_top", 20)
+	margin.add_theme_constant_override("margin_bottom", 20)
+	settings_panel.add_child(margin)
+
+	var vbox := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 12)
+	margin.add_child(vbox)
+
+	# Title
+	var title := Label.new()
+	title.text = "SETTINGS"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 28)
+	title.add_theme_color_override("font_color", Color(0.8, 0.8, 0.8))
+	vbox.add_child(title)
+
+	var sep1 := HSeparator.new()
+	vbox.add_child(sep1)
+
+	# Audio section
+	var audio_label := Label.new()
+	audio_label.text = "Audio"
+	audio_label.add_theme_font_size_override("font_size", 20)
+	audio_label.add_theme_color_override("font_color", Color(0.6, 0.8, 0.9))
+	vbox.add_child(audio_label)
+
+	# Master Volume
+	vbox.add_child(_create_volume_slider("Master Volume", "master_volume", 1.0))
+	# Music Volume
+	vbox.add_child(_create_volume_slider("Music Volume", "music_volume", 0.8))
+	# SFX Volume
+	vbox.add_child(_create_volume_slider("SFX Volume", "sfx_volume", 1.0))
+
+	var sep2 := HSeparator.new()
+	vbox.add_child(sep2)
+
+	# Graphics section
+	var graphics_label := Label.new()
+	graphics_label.text = "Graphics"
+	graphics_label.add_theme_font_size_override("font_size", 20)
+	graphics_label.add_theme_color_override("font_color", Color(0.6, 0.8, 0.9))
+	vbox.add_child(graphics_label)
+
+	# Fullscreen toggle
+	vbox.add_child(_create_toggle_setting("Fullscreen", "fullscreen", false))
+	# VSync toggle
+	vbox.add_child(_create_toggle_setting("VSync", "vsync", true))
+
+	var sep3 := HSeparator.new()
+	vbox.add_child(sep3)
+
+	# Controls section
+	var controls_label := Label.new()
+	controls_label.text = "Controls"
+	controls_label.add_theme_font_size_override("font_size", 20)
+	controls_label.add_theme_color_override("font_color", Color(0.6, 0.8, 0.9))
+	vbox.add_child(controls_label)
+
+	# Mouse Sensitivity
+	vbox.add_child(_create_sensitivity_slider("Mouse Sensitivity", "mouse_sensitivity", 0.5))
+
+	# Spacer
+	var spacer := Control.new()
+	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	vbox.add_child(spacer)
+
+	# Buttons row
+	var btn_row := HBoxContainer.new()
+	btn_row.add_theme_constant_override("separation", 15)
+	vbox.add_child(btn_row)
+
+	var apply_btn := _create_menu_button("Apply", Color(0.3, 0.6, 0.3))
+	apply_btn.custom_minimum_size = Vector2(140, 45)
+	apply_btn.pressed.connect(_on_settings_apply_pressed)
+	btn_row.add_child(apply_btn)
+
+	var reset_btn := _create_menu_button("Reset", Color(0.6, 0.5, 0.3))
+	reset_btn.custom_minimum_size = Vector2(140, 45)
+	reset_btn.pressed.connect(_on_settings_reset_pressed)
+	btn_row.add_child(reset_btn)
+
+	var back_btn := _create_menu_button("Back", Color(0.4, 0.4, 0.4))
+	back_btn.custom_minimum_size = Vector2(140, 45)
+	back_btn.pressed.connect(_on_settings_back_pressed)
+	btn_row.add_child(back_btn)
+
+
+func _create_volume_slider(label_text: String, setting_name: String, default_value: float) -> HBoxContainer:
+	var container := HBoxContainer.new()
+	container.add_theme_constant_override("separation", 15)
+
+	var label := Label.new()
+	label.text = label_text
+	label.custom_minimum_size = Vector2(140, 0)
+	container.add_child(label)
+
+	var slider := HSlider.new()
+	slider.name = setting_name
+	slider.min_value = 0.0
+	slider.max_value = 1.0
+	slider.step = 0.05
+	slider.value = _load_setting(setting_name, default_value)
+	slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	slider.custom_minimum_size = Vector2(200, 25)
+	slider.value_changed.connect(_on_volume_changed.bind(setting_name))
+	container.add_child(slider)
+
+	var value_label := Label.new()
+	value_label.name = setting_name + "_value"
+	value_label.text = "%d%%" % int(slider.value * 100)
+	value_label.custom_minimum_size = Vector2(50, 0)
+	value_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	container.add_child(value_label)
+
+	return container
+
+
+func _create_sensitivity_slider(label_text: String, setting_name: String, default_value: float) -> HBoxContainer:
+	var container := HBoxContainer.new()
+	container.add_theme_constant_override("separation", 15)
+
+	var label := Label.new()
+	label.text = label_text
+	label.custom_minimum_size = Vector2(140, 0)
+	container.add_child(label)
+
+	var slider := HSlider.new()
+	slider.name = setting_name
+	slider.min_value = 0.1
+	slider.max_value = 2.0
+	slider.step = 0.1
+	slider.value = _load_setting(setting_name, default_value)
+	slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	slider.custom_minimum_size = Vector2(200, 25)
+	slider.value_changed.connect(_on_sensitivity_changed.bind(setting_name))
+	container.add_child(slider)
+
+	var value_label := Label.new()
+	value_label.name = setting_name + "_value"
+	value_label.text = "%.1f" % slider.value
+	value_label.custom_minimum_size = Vector2(50, 0)
+	value_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	container.add_child(value_label)
+
+	return container
+
+
+func _create_toggle_setting(label_text: String, setting_name: String, default_value: bool) -> HBoxContainer:
+	var container := HBoxContainer.new()
+	container.add_theme_constant_override("separation", 15)
+
+	var label := Label.new()
+	label.text = label_text
+	label.custom_minimum_size = Vector2(140, 0)
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	container.add_child(label)
+
+	var toggle := CheckButton.new()
+	toggle.name = setting_name
+	toggle.button_pressed = _load_setting(setting_name, default_value)
+	toggle.toggled.connect(_on_toggle_changed.bind(setting_name))
+	container.add_child(toggle)
+
+	return container
 
 	# Spacer
 	var spacer := Control.new()
@@ -486,6 +668,8 @@ func _show_login() -> void:
 	play_panel.visible = false
 	direct_connect_panel.visible = false
 	login_panel.visible = true
+	if settings_panel:
+		settings_panel.visible = false
 	player_info_label.visible = false
 
 
@@ -494,6 +678,8 @@ func _show_main_menu() -> void:
 	play_panel.visible = false
 	direct_connect_panel.visible = false
 	login_panel.visible = false
+	if settings_panel:
+		settings_panel.visible = false
 	player_info_label.visible = true
 
 	if FriendSystem:
@@ -506,6 +692,8 @@ func _show_play_menu() -> void:
 	play_panel.visible = true
 	direct_connect_panel.visible = false
 	login_panel.visible = false
+	if settings_panel:
+		settings_panel.visible = false
 	status_label.text = ""
 
 
@@ -514,6 +702,17 @@ func _show_direct_connect() -> void:
 	play_panel.visible = false
 	direct_connect_panel.visible = true
 	login_panel.visible = false
+	if settings_panel:
+		settings_panel.visible = false
+	status_label.text = ""
+
+
+func _show_settings() -> void:
+	main_panel.visible = false
+	play_panel.visible = false
+	direct_connect_panel.visible = false
+	login_panel.visible = false
+	settings_panel.visible = true
 	status_label.text = ""
 
 
@@ -610,8 +809,7 @@ func _on_market_pressed() -> void:
 
 
 func _on_settings_pressed() -> void:
-	status_label.text = "Settings not yet implemented"
-	status_label.add_theme_color_override("font_color", Color.GRAY)
+	_show_settings()
 
 
 func _on_quit_pressed() -> void:
@@ -833,6 +1031,142 @@ func _is_dedicated_server() -> bool:
 		if arg == "--headless" or arg == "--server":
 			return true
 	return DisplayServer.get_name() == "headless"
+
+
+# ============================================
+# SETTINGS HANDLERS
+# ============================================
+
+const SETTINGS_PATH := "user://settings.cfg"
+
+func _on_volume_changed(value: float, setting_name: String) -> void:
+	# Update the value label
+	var value_label := settings_panel.find_child(setting_name + "_value", true, false)
+	if value_label:
+		value_label.text = "%d%%" % int(value * 100)
+
+	# Store temporarily (applied on "Apply")
+	_pending_settings[setting_name] = value
+
+
+func _on_sensitivity_changed(value: float, setting_name: String) -> void:
+	var value_label := settings_panel.find_child(setting_name + "_value", true, false)
+	if value_label:
+		value_label.text = "%.1f" % value
+
+	_pending_settings[setting_name] = value
+
+
+func _on_toggle_changed(pressed: bool, setting_name: String) -> void:
+	_pending_settings[setting_name] = pressed
+
+
+var _pending_settings: Dictionary = {}
+
+
+func _on_settings_apply_pressed() -> void:
+	# Apply all pending settings
+	for setting_name in _pending_settings:
+		_apply_setting(setting_name, _pending_settings[setting_name])
+		_save_setting(setting_name, _pending_settings[setting_name])
+
+	_pending_settings.clear()
+
+	status_label.text = "Settings applied"
+	status_label.add_theme_color_override("font_color", Color.GREEN)
+
+
+func _on_settings_reset_pressed() -> void:
+	# Reset to defaults
+	var defaults := {
+		"master_volume": 1.0,
+		"music_volume": 0.8,
+		"sfx_volume": 1.0,
+		"fullscreen": false,
+		"vsync": true,
+		"mouse_sensitivity": 0.5
+	}
+
+	for setting_name in defaults:
+		var default_value = defaults[setting_name]
+		_apply_setting(setting_name, default_value)
+		_save_setting(setting_name, default_value)
+
+		# Update UI controls
+		var control := settings_panel.find_child(setting_name, true, false)
+		if control is HSlider:
+			control.value = default_value
+		elif control is CheckButton:
+			control.button_pressed = default_value
+
+	_pending_settings.clear()
+
+	status_label.text = "Settings reset to defaults"
+	status_label.add_theme_color_override("font_color", Color.ORANGE)
+
+
+func _on_settings_back_pressed() -> void:
+	_pending_settings.clear()
+	_show_main_menu()
+
+
+func _apply_setting(setting_name: String, value: Variant) -> void:
+	match setting_name:
+		"master_volume":
+			AudioServer.set_bus_volume_db(AudioServer.get_bus_index("Master"), linear_to_db(value))
+		"music_volume":
+			var idx := AudioServer.get_bus_index("Music")
+			if idx >= 0:
+				AudioServer.set_bus_volume_db(idx, linear_to_db(value))
+		"sfx_volume":
+			var idx := AudioServer.get_bus_index("SFX")
+			if idx >= 0:
+				AudioServer.set_bus_volume_db(idx, linear_to_db(value))
+		"fullscreen":
+			if value:
+				DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
+			else:
+				DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
+		"vsync":
+			DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_ENABLED if value else DisplayServer.VSYNC_DISABLED)
+		"mouse_sensitivity":
+			# Store sensitivity for player controller to access
+			Engine.set_meta("mouse_sensitivity", value)
+
+
+func _save_setting(setting_name: String, value: Variant) -> void:
+	var config := ConfigFile.new()
+	config.load(SETTINGS_PATH)
+	config.set_value("settings", setting_name, value)
+	config.save(SETTINGS_PATH)
+
+
+func _load_setting(setting_name: String, default_value: Variant) -> Variant:
+	var config := ConfigFile.new()
+	if config.load(SETTINGS_PATH) == OK:
+		return config.get_value("settings", setting_name, default_value)
+	return default_value
+
+
+func _apply_saved_settings() -> void:
+	var config := ConfigFile.new()
+	if config.load(SETTINGS_PATH) != OK:
+		return
+
+	# Apply all saved settings
+	var settings := ["master_volume", "music_volume", "sfx_volume", "fullscreen", "vsync", "mouse_sensitivity"]
+	var defaults := {
+		"master_volume": 1.0,
+		"music_volume": 0.8,
+		"sfx_volume": 1.0,
+		"fullscreen": false,
+		"vsync": true,
+		"mouse_sensitivity": 0.5
+	}
+
+	for setting_name in settings:
+		var value = config.get_value("settings", setting_name, defaults.get(setting_name, 1.0))
+		_apply_setting(setting_name, value)
 
 
 # ============================================

@@ -44,6 +44,7 @@ var animation_controller: AnimationController = null
 var inventory_runtime: InventoryRuntime = null
 var equipment_runtime: EquipmentRuntime = null
 var attribute_system: AttributeSystem = null
+var skill_system: SkillSystem = null
 var network_controller: PlayerNetworkController = null
 
 # Prop handler (for barricade system)
@@ -97,6 +98,11 @@ func _setup_controllers() -> void:
 	_load_character_progression()  # Load from saved data instead of defaults
 	attribute_system.derived_stats_updated.connect(_on_derived_stats_updated)
 	attribute_system.level_up.connect(_on_level_up)
+
+	# Skill System (passive skill bonuses)
+	skill_system = SkillSystem.new()
+	_load_skill_progression()  # Load from saved data
+	skill_system.skill_upgraded.connect(_on_skill_upgraded)
 
 	# Combat Controller
 	combat_controller = CombatController.new()
@@ -512,26 +518,49 @@ func get_attribute_system() -> AttributeSystem:
 # ============================================
 
 func _on_derived_stats_updated(stats: Dictionary) -> void:
-	# Update max health from endurance
-	max_health = stats.get("max_health", 100.0)
+	# Get skill bonuses
+	var skill_bonuses: Dictionary = {}
+	if skill_system:
+		skill_bonuses = skill_system.get_stat_bonuses()
+
+	# Update max health from endurance + skills
+	var base_max_health: float = stats.get("max_health", 100.0)
+	var health_mult: float = skill_bonuses.get("health_mult", 1.0)
+	max_health = base_max_health * health_mult
 
 	# Cap current health to new max
 	if health > max_health:
 		health = max_health
 
-	# Update movement controller with attribute multipliers
+	# Update movement controller with attribute + skill multipliers
 	if movement_controller:
-		movement_controller.attribute_move_speed_mult = stats.get("move_speed_mult", 1.0)
-		movement_controller.attribute_sprint_speed_mult = stats.get("sprint_speed_mult", 1.0)
-		movement_controller.attribute_stamina_regen_mult = stats.get("stamina_regen_mult", 1.0)
-		movement_controller.max_stamina = stats.get("max_stamina", 100.0)
+		var move_mult: float = stats.get("move_speed_mult", 1.0) * skill_bonuses.get("move_speed_mult", 1.0)
+		var sprint_mult: float = stats.get("sprint_speed_mult", 1.0) * skill_bonuses.get("sprint_mult", 1.0)
+		var stamina_regen_mult: float = stats.get("stamina_regen_mult", 1.0) * skill_bonuses.get("stamina_regen_mult", 1.0)
+		var stamina_mult: float = skill_bonuses.get("stamina_mult", 1.0)
 
-	# Update combat controller with attribute multipliers
+		movement_controller.attribute_move_speed_mult = move_mult
+		movement_controller.attribute_sprint_speed_mult = sprint_mult
+		movement_controller.attribute_stamina_regen_mult = stamina_regen_mult
+		movement_controller.max_stamina = stats.get("max_stamina", 100.0) * stamina_mult
+
+	# Update combat controller with attribute + skill multipliers
 	if combat_controller:
-		combat_controller.attribute_reload_speed_mult = stats.get("reload_speed_mult", 1.0)
-		combat_controller.attribute_ads_speed_mult = stats.get("ads_speed_mult", 1.0)
-		combat_controller.attribute_crit_chance = stats.get("crit_chance", 0.05)
-		combat_controller.attribute_crit_damage_mult = stats.get("crit_damage_mult", 1.5)
+		var reload_mult: float = stats.get("reload_speed_mult", 1.0) * skill_bonuses.get("reload_speed_mult", 1.0)
+		var ads_mult: float = stats.get("ads_speed_mult", 1.0) * skill_bonuses.get("ads_speed_mult", 1.0)
+		var crit_chance: float = stats.get("crit_chance", 0.05) + skill_bonuses.get("crit_chance", 0.0)
+		var crit_damage: float = stats.get("crit_damage_mult", 1.5) + (skill_bonuses.get("crit_damage", 1.5) - 1.5)
+
+		combat_controller.attribute_reload_speed_mult = reload_mult
+		combat_controller.attribute_ads_speed_mult = ads_mult
+		combat_controller.attribute_crit_chance = crit_chance
+		combat_controller.attribute_crit_damage_mult = crit_damage
+
+		# Additional skill bonuses for combat
+		combat_controller.skill_damage_mult = skill_bonuses.get("damage_mult", 1.0)
+		combat_controller.skill_fire_rate_mult = skill_bonuses.get("fire_rate_mult", 1.0)
+		combat_controller.skill_accuracy_mult = skill_bonuses.get("accuracy_mult", 1.0)
+		combat_controller.skill_recoil_mult = skill_bonuses.get("recoil_mult", 1.0)
 
 
 func _on_level_up(new_level: int, attribute_points: int) -> void:
@@ -615,6 +644,47 @@ func grant_xp(amount: int) -> void:
 	if attribute_system:
 		attribute_system.add_experience(amount)
 
+	# Also add XP to skill system for skill points
+	if skill_system:
+		skill_system.add_xp(amount)
+
 	# Also persist to EconomyService
 	if EconomyService and EconomyService.is_logged_in:
 		EconomyService.add_experience(amount)
+
+
+## Load skill progression data from EconomyService
+func _load_skill_progression() -> void:
+	if not skill_system:
+		return
+
+	# Try to load from EconomyService (if logged in)
+	if EconomyService and EconomyService.is_logged_in:
+		var saved_data: Dictionary = EconomyService.get_character_data()
+		var skill_data: Dictionary = saved_data.get("skill_data", {})
+
+		if not skill_data.is_empty():
+			skill_system.load_save_data(skill_data)
+			print("[Player] Loaded skill progression: %d skill points, prestige %d" % [
+				skill_system.skill_points,
+				skill_system.prestige_level
+			])
+
+
+## Called when a skill is upgraded
+func _on_skill_upgraded(_category: String, skill_id: String, new_level: int) -> void:
+	print("[Player] Skill '%s' upgraded to level %d" % [skill_id, new_level])
+
+	# Recalculate derived stats with new skill bonuses
+	if attribute_system:
+		attribute_system._recalculate_derived_stats()
+
+	# Save progression
+	if EconomyService and EconomyService.is_logged_in:
+		var skill_data := skill_system.get_save_data() if skill_system else {}
+		EconomyService.save_character_data({"skill_data": skill_data})
+
+
+## Get the skill system
+func get_skill_system() -> SkillSystem:
+	return skill_system
