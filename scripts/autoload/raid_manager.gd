@@ -46,33 +46,39 @@ func set_match_id(match_id: String) -> void:
 # ============================================
 
 ## Register a player's raid (server receives this from client on connect)
-func register_raid(peer_id: int, raid_id: String, character_id: String, loadout_iids: Array) -> void:
+func register_raid(peer_id: int, raid_id: String, character_id: String, loadout_items: Array) -> void:
 	if not NetworkManager.is_authority():
 		return
+
+	# Extract IIDs for backend commit tracking
+	var loadout_iids: Array = []
+	for item in loadout_items:
+		loadout_iids.append(item.get("iid", ""))
 
 	active_raids[peer_id] = {
 		"raid_id": raid_id,
 		"character_id": character_id,
 		"loadout_iids": loadout_iids,
+		"loadout_items": loadout_items,  # Full item data for server-side equipping
 		"provisional_loot": [],  # Items found during raid
 		"extracted": false,
 		"dead": false,
 		"committed": false
 	}
 
-	print("[RaidManager] Registered raid for peer %d: raid_id=%s, character=%s" % [
-		peer_id, raid_id.substr(0, 8), character_id.substr(0, 8)
+	print("[RaidManager] Registered raid for peer %d: raid_id=%s, character=%s, items=%d" % [
+		peer_id, raid_id.substr(0, 8), character_id.substr(0, 8), loadout_items.size()
 	])
 
 
 ## Client RPC to register raid with server
 @rpc("any_peer", "reliable")
-func rpc_register_raid(raid_id: String, character_id: String, loadout_iids: Array) -> void:
+func rpc_register_raid(raid_id: String, character_id: String, loadout_items: Array) -> void:
 	if not NetworkManager.is_authority():
 		return
 
 	var peer_id := multiplayer.get_remote_sender_id()
-	register_raid(peer_id, raid_id, character_id, loadout_iids)
+	register_raid(peer_id, raid_id, character_id, loadout_items)
 
 
 # ============================================
@@ -335,8 +341,22 @@ func client_register_raid() -> void:
 		print("[RaidManager] Client has no active raid")
 		return
 
-	print("[RaidManager] Sending raid registration to server...")
-	rpc_register_raid.rpc_id(1, raid_id, character_id, locked_iids)
+	# Build loadout data with item definitions for server
+	var loadout_items: Array = []
+	for iid in locked_iids:
+		var item: Dictionary = EconomyService.get_item(iid)
+		var def_id: String = item.get("def_id", item.get("defId", ""))
+		var item_def: Dictionary = EconomyService.get_item_def(def_id)
+
+		loadout_items.append({
+			"iid": iid,
+			"def_id": def_id,
+			"item_def": item_def,  # Include full definition for server
+			"item_data": item
+		})
+
+	print("[RaidManager] Sending raid registration to server with %d items..." % loadout_items.size())
+	rpc_register_raid.rpc_id(1, raid_id, character_id, loadout_items)
 
 
 ## Called by client when they reach extraction

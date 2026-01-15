@@ -13,7 +13,7 @@ extends Node3D
 @onready var props_container: Node = $Props
 @onready var spawn_points: Node = $SpawnPoints
 @onready var wave_manager: WaveManager = $WaveManager if has_node("WaveManager") else null
-@onready var hud: Control = $HUD if has_node("HUD") else null
+@onready var hud = $HUD if has_node("HUD") else null
 
 # Sigil (defense objective)
 var sigil: Sigil = null
@@ -297,9 +297,14 @@ func _equip_player(player: PlayerController) -> void:
 	var inventory := player.get_inventory_runtime()
 	var equipment := player.get_equipment_runtime()
 
-	# Try to apply loadout from EconomyService (if player prepared a raid)
+	# Try to apply loadout from appropriate source
 	var loadout_applied := false
-	if EconomyService and EconomyService.is_logged_in:
+
+	# On server: Use RaidManager which received loadout from client
+	if NetworkManager.is_authority():
+		loadout_applied = _apply_loadout_from_raid_manager(player, inventory, equipment)
+	# On client: Use EconomyService for local player
+	elif EconomyService and EconomyService.is_logged_in:
 		loadout_applied = _apply_loadout_from_economy(player, inventory, equipment)
 
 	# Fall back to default loadout if no prepared loadout
@@ -331,7 +336,75 @@ func _equip_player(player: PlayerController) -> void:
 		player.set_meta("hammer", hammer)
 
 
-## Apply loadout from EconomyService (prepared raid items)
+## Apply loadout from RaidManager (server-side, data received from client)
+func _apply_loadout_from_raid_manager(player: PlayerController, inventory: InventoryRuntime, equipment: EquipmentRuntime) -> bool:
+	if not RaidManager:
+		return false
+
+	var raid_info: Dictionary = RaidManager.get_raid_info(player.peer_id)
+	if raid_info.is_empty():
+		print("[GameWorld] No raid info for player %d" % player.peer_id)
+		return false
+
+	var loadout_items: Array = raid_info.get("loadout_items", [])
+	if loadout_items.is_empty():
+		return false
+
+	print("[GameWorld] Server applying loadout with %d items for player %d" % [loadout_items.size(), player.peer_id])
+
+	var equipped_primary := false
+
+	for loadout_entry in loadout_items:
+		var iid: String = loadout_entry.get("iid", "")
+		var item_def: Dictionary = loadout_entry.get("item_def", {})
+		var item_data: Dictionary = loadout_entry.get("item_data", {})
+
+		if item_def.is_empty():
+			continue
+
+		var category: String = item_def.get("category", "misc").to_lower()
+
+		# Handle weapons
+		if category in ["weapon", "rifle", "shotgun", "smg", "pistol"]:
+			if inventory:
+				var weapon := _create_weapon_from_item(item_data, item_def)
+				if weapon:
+					var slot := 0 if not equipped_primary else 1
+					inventory.add_weapon(weapon, slot)
+					print("[GameWorld] Server equipped %s in slot %d for peer %d" % [weapon.name, slot, player.peer_id])
+
+					if slot == 0:
+						equipped_primary = true
+						var combat := player.get_combat_controller()
+						if combat:
+							combat.bind_weapon(weapon)
+
+		# Handle armor/equipment
+		elif category in ["helmet", "headwear"]:
+			if equipment:
+				equipment.equip_item("helmet", item_data)
+
+		elif category in ["armor", "vest"]:
+			if equipment:
+				equipment.equip_item("vest", item_data)
+
+		elif category in ["rig", "tactical_rig"]:
+			if equipment:
+				equipment.equip_item("rig", item_data)
+
+		elif category in ["backpack", "bag"]:
+			if equipment:
+				equipment.equip_item("backpack", item_data)
+
+		# Handle consumables/ammo - add to inventory
+		elif category in ["ammo", "medical", "consumable"]:
+			if inventory:
+				inventory.add_item_to_container(item_data, item_def)
+
+	return loadout_items.size() > 0
+
+
+## Apply loadout from EconomyService (client-side, for local player)
 func _apply_loadout_from_economy(player: PlayerController, inventory: InventoryRuntime, equipment: EquipmentRuntime) -> bool:
 	var locked_iids: Array = EconomyService.locked_iids
 	if locked_iids.is_empty():
@@ -530,15 +603,14 @@ func _on_sigil_corrupted() -> void:
 # ============================================
 
 func _setup_hud_connections() -> void:
-	# Find HUD in scene
-	var animated_hud: AnimatedHUD = null
+	# Find HUD in scene - use untyped variable to avoid cast errors
+	var animated_hud = null
 
 	if hud and hud is AnimatedHUD:
-		@warning_ignore("unsafe_cast")
 		animated_hud = hud
 	else:
 		# Look for HUD in UI layer
-		var root_hud := get_node_or_null("/root/AnimatedHUD")
+		var root_hud = get_node_or_null("/root/AnimatedHUD")
 		if root_hud and root_hud is AnimatedHUD:
 			animated_hud = root_hud
 		else:
