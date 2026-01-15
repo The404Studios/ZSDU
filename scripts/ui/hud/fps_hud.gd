@@ -76,6 +76,12 @@ var wave_container: Control
 var wave_label: Label
 var current_wave: int = 0
 
+# Kill stats display
+var stats_container: Control
+var kills_label: Label
+var zombies_remaining_label: Label
+var player_kills: int = 0
+
 # Extraction display
 var extraction_container: Control
 var extraction_label: Label
@@ -83,6 +89,13 @@ var extraction_progress: ProgressBar
 var extraction_active: bool = false
 var extraction_time: float = 0.0
 var extraction_max_time: float = 5.0
+
+# Death/Game Over display
+var death_screen: Control
+var game_over_screen: Control
+var game_over_title: Label
+var game_over_stats: Label
+var is_dead: bool = false
 
 # Connection tracking
 var _connected_player: PlayerController = null
@@ -119,7 +132,10 @@ func _build_ui() -> void:
 	_build_crosshair()
 	_build_vignette()
 	_build_wave_display()
+	_build_stats_display()
 	_build_extraction_display()
+	_build_death_screen()
+	_build_game_over_screen()
 	_build_xp_popup_container()
 
 
@@ -941,6 +957,12 @@ func _on_wave_started(wave_number: int) -> void:
 	current_wave = wave_number
 	wave_label.text = "WAVE %d" % wave_number
 
+	# Reset kill counter for new wave (keep total kills)
+	# Update zombies remaining from GameState
+	if GameState:
+		var remaining: int = GameState.wave_zombies_remaining
+		zombies_remaining_label.text = "REMAINING: %d" % remaining
+
 	# Flash effect
 	var tween := wave_container.create_tween()
 	tween.tween_property(wave_container, "modulate", Color(2, 2, 2), 0.1)
@@ -972,6 +994,64 @@ func _show_wave_announcement(wave_number: int) -> void:
 	tween.tween_interval(1.5)
 	tween.tween_property(announce, "modulate:a", 0.0, 0.5)
 	tween.tween_callback(announce.queue_free)
+
+
+# ============================================
+# STATS DISPLAY (Kills & Zombies Remaining)
+# ============================================
+
+func _build_stats_display() -> void:
+	stats_container = Control.new()
+	stats_container.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	stats_container.position = Vector2(-170, 10)
+	stats_container.size = Vector2(160, 60)
+	stats_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(stats_container)
+
+	# Background
+	var bg := ColorRect.new()
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bg.color = Color(0.1, 0.1, 0.12, 0.8)
+	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	stats_container.add_child(bg)
+
+	# Kills label
+	kills_label = Label.new()
+	kills_label.text = "KILLS: 0"
+	kills_label.position = Vector2(10, 8)
+	kills_label.size = Vector2(140, 20)
+	kills_label.add_theme_font_size_override("font_size", 14)
+	kills_label.add_theme_color_override("font_color", Color(0.9, 0.3, 0.3))
+	kills_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	stats_container.add_child(kills_label)
+
+	# Zombies remaining label
+	zombies_remaining_label = Label.new()
+	zombies_remaining_label.text = "REMAINING: 0"
+	zombies_remaining_label.position = Vector2(10, 32)
+	zombies_remaining_label.size = Vector2(140, 20)
+	zombies_remaining_label.add_theme_font_size_override("font_size", 14)
+	zombies_remaining_label.add_theme_color_override("font_color", Color(0.7, 0.7, 0.75))
+	zombies_remaining_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	stats_container.add_child(zombies_remaining_label)
+
+	# Connect to GameState zombie_killed signal
+	if GameState:
+		GameState.zombie_killed.connect(_on_zombie_killed)
+
+
+func _on_zombie_killed(_zombie_id: int) -> void:
+	player_kills += 1
+	kills_label.text = "KILLS: %d" % player_kills
+
+	# Update zombies remaining from GameState
+	if GameState:
+		var remaining: int = GameState.wave_zombies_remaining - GameState.wave_zombies_killed
+		zombies_remaining_label.text = "REMAINING: %d" % maxi(remaining, 0)
+
+
+func update_zombies_remaining(remaining: int) -> void:
+	zombies_remaining_label.text = "REMAINING: %d" % remaining
 
 
 # ============================================
@@ -1125,3 +1205,153 @@ func _on_player_extracted(peer_id: int) -> void:
 	var local_peer := NetworkManager.local_peer_id if NetworkManager else 1
 	if peer_id == local_peer:
 		complete_extraction()
+
+
+# ============================================
+# DEATH SCREEN
+# ============================================
+
+func _build_death_screen() -> void:
+	death_screen = Control.new()
+	death_screen.set_anchors_preset(Control.PRESET_FULL_RECT)
+	death_screen.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	death_screen.visible = false
+	root.add_child(death_screen)
+
+	# Dark overlay
+	var overlay := ColorRect.new()
+	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	overlay.color = Color(0.1, 0, 0, 0.7)
+	overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	death_screen.add_child(overlay)
+
+	# YOU DIED text
+	var died_label := Label.new()
+	died_label.text = "YOU DIED"
+	died_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	died_label.set_anchors_preset(Control.PRESET_CENTER)
+	died_label.position = Vector2(-200, -50)
+	died_label.size = Vector2(400, 100)
+	died_label.add_theme_font_size_override("font_size", 64)
+	died_label.add_theme_color_override("font_color", Color(0.8, 0.1, 0.1))
+	died_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	death_screen.add_child(died_label)
+
+	# Respawn hint
+	var hint_label := Label.new()
+	hint_label.text = "Waiting for respawn..."
+	hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hint_label.set_anchors_preset(Control.PRESET_CENTER)
+	hint_label.position = Vector2(-200, 50)
+	hint_label.size = Vector2(400, 30)
+	hint_label.add_theme_font_size_override("font_size", 18)
+	hint_label.add_theme_color_override("font_color", Color(0.6, 0.6, 0.65))
+	hint_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	death_screen.add_child(hint_label)
+
+	# Connect to player died signal
+	if GameState:
+		GameState.player_died.connect(_on_player_died)
+		GameState.player_spawned.connect(_on_player_respawned)
+
+
+func _on_player_died(peer_id: int) -> void:
+	var local_peer := NetworkManager.local_peer_id if NetworkManager else 1
+	if peer_id == local_peer:
+		show_death_screen()
+
+
+func _on_player_respawned(peer_id: int, _player_node: Node3D) -> void:
+	var local_peer := NetworkManager.local_peer_id if NetworkManager else 1
+	if peer_id == local_peer:
+		hide_death_screen()
+
+
+func show_death_screen() -> void:
+	is_dead = true
+	death_screen.visible = true
+	death_screen.modulate.a = 0
+
+	var tween := death_screen.create_tween()
+	tween.tween_property(death_screen, "modulate:a", 1.0, 0.5)
+
+
+func hide_death_screen() -> void:
+	is_dead = false
+
+	var tween := death_screen.create_tween()
+	tween.tween_property(death_screen, "modulate:a", 0.0, 0.3)
+	tween.tween_callback(func(): death_screen.visible = false)
+
+
+# ============================================
+# GAME OVER SCREEN
+# ============================================
+
+func _build_game_over_screen() -> void:
+	game_over_screen = Control.new()
+	game_over_screen.set_anchors_preset(Control.PRESET_FULL_RECT)
+	game_over_screen.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	game_over_screen.visible = false
+	root.add_child(game_over_screen)
+
+	# Dark overlay
+	var overlay := ColorRect.new()
+	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	overlay.color = Color(0, 0, 0, 0.85)
+	overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	game_over_screen.add_child(overlay)
+
+	# Title (VICTORY or DEFEAT)
+	game_over_title = Label.new()
+	game_over_title.text = "GAME OVER"
+	game_over_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	game_over_title.set_anchors_preset(Control.PRESET_CENTER)
+	game_over_title.position = Vector2(-250, -100)
+	game_over_title.size = Vector2(500, 80)
+	game_over_title.add_theme_font_size_override("font_size", 56)
+	game_over_title.add_theme_color_override("font_color", Color.WHITE)
+	game_over_title.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	game_over_screen.add_child(game_over_title)
+
+	# Stats
+	game_over_stats = Label.new()
+	game_over_stats.text = "Wave: 1\nKills: 0"
+	game_over_stats.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	game_over_stats.set_anchors_preset(Control.PRESET_CENTER)
+	game_over_stats.position = Vector2(-200, 0)
+	game_over_stats.size = Vector2(400, 100)
+	game_over_stats.add_theme_font_size_override("font_size", 20)
+	game_over_stats.add_theme_color_override("font_color", Color(0.7, 0.7, 0.75))
+	game_over_stats.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	game_over_screen.add_child(game_over_stats)
+
+	# Connect to game over signal
+	if GameState:
+		GameState.game_over.connect(_on_game_over)
+
+
+func _on_game_over(reason: String, victory: bool) -> void:
+	show_game_over(reason, victory)
+
+
+func show_game_over(reason: String, victory: bool) -> void:
+	# Hide death screen if showing
+	death_screen.visible = false
+
+	# Set title and color based on victory/defeat
+	if victory:
+		game_over_title.text = "VICTORY"
+		game_over_title.add_theme_color_override("font_color", Color(0.3, 0.9, 0.3))
+	else:
+		game_over_title.text = "DEFEAT"
+		game_over_title.add_theme_color_override("font_color", Color(0.9, 0.3, 0.3))
+
+	# Set stats
+	game_over_stats.text = "%s\n\nWave: %d\nKills: %d" % [reason, current_wave, player_kills]
+
+	game_over_screen.visible = true
+	game_over_screen.modulate.a = 0
+
+	var tween := game_over_screen.create_tween()
+	tween.tween_property(game_over_screen, "modulate:a", 1.0, 0.5)

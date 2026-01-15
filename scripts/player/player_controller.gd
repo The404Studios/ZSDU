@@ -241,6 +241,10 @@ func _physics_process(delta: float) -> void:
 	if is_dead:
 		return
 
+	# Health regeneration (server-authoritative)
+	if NetworkManager and NetworkManager.is_authority():
+		_process_health_regen(delta)
+
 	# Network controller handles all the tick logic based on authority
 	# Movement and combat are processed there
 
@@ -408,6 +412,28 @@ func respawn(spawn_position: Vector3) -> void:
 func request_extract() -> void:
 	if is_local_player:
 		RaidManager.client_request_extract()
+
+
+## Process health regeneration (server-side)
+func _process_health_regen(delta: float) -> void:
+	if health >= max_health:
+		return
+
+	# Get total health regen from all sources
+	var health_regen := 0.0
+
+	# From equipment
+	if equipment_runtime:
+		health_regen += equipment_runtime.get_stat("health_regen")
+
+	# From attributes (endurance gives +0.1 HP/sec per point above base)
+	if attribute_system:
+		var derived := attribute_system.get_derived_stats()
+		health_regen += derived.get("health_regen", 0.0)
+
+	# Apply regeneration
+	if health_regen > 0:
+		health = minf(health + health_regen * delta, max_health)
 
 
 # ============================================
