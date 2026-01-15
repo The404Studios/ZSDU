@@ -71,6 +71,19 @@ var active_buffs: Array[Dictionary] = []
 var xp_popup_container: Control
 var xp_popups: Array[Dictionary] = []
 
+# Wave display
+var wave_container: Control
+var wave_label: Label
+var current_wave: int = 0
+
+# Extraction display
+var extraction_container: Control
+var extraction_label: Label
+var extraction_progress: ProgressBar
+var extraction_active: bool = false
+var extraction_time: float = 0.0
+var extraction_max_time: float = 5.0
+
 # Connection tracking
 var _connected_player: PlayerController = null
 
@@ -87,6 +100,7 @@ func _process(delta: float) -> void:
 	_update_from_player()
 	_update_buffs()
 	_update_xp_popups(delta)
+	_update_extraction(delta)
 
 
 # ============================================
@@ -104,6 +118,8 @@ func _build_ui() -> void:
 	_build_ammo_display()
 	_build_crosshair()
 	_build_vignette()
+	_build_wave_display()
+	_build_extraction_display()
 	_build_xp_popup_container()
 
 
@@ -861,7 +877,7 @@ func show_level_up(new_level: int, attribute_points: int) -> void:
 
 	# Attribute points
 	var points_label := Label.new()
-	points_label.text = "+%d Attribute Points" % 3  # POINTS_PER_LEVEL
+	points_label.text = "+3 Attribute Points" if attribute_points >= 3 else "+%d Total Points" % attribute_points
 	points_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	points_label.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
 	points_label.position.y = -30
@@ -880,3 +896,232 @@ func show_level_up(new_level: int, attribute_points: int) -> void:
 	tween.tween_interval(2.0)  # Hold for 2 seconds
 	tween.tween_property(level_popup, "modulate:a", 0.0, 0.5)
 	tween.tween_callback(level_popup.queue_free)
+
+
+# ============================================
+# WAVE DISPLAY
+# ============================================
+
+func _build_wave_display() -> void:
+	wave_container = Control.new()
+	wave_container.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	wave_container.position = Vector2(0, 10)
+	wave_container.size = Vector2(200, 40)
+	wave_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(wave_container)
+
+	# Center the container
+	wave_container.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	wave_container.position = Vector2(-100, 10)
+
+	# Background
+	var bg := ColorRect.new()
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bg.color = Color(0.1, 0.1, 0.12, 0.8)
+	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	wave_container.add_child(bg)
+
+	# Wave label
+	wave_label = Label.new()
+	wave_label.text = "WAVE 1"
+	wave_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	wave_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	wave_label.set_anchors_preset(Control.PRESET_FULL_RECT)
+	wave_label.add_theme_font_size_override("font_size", 20)
+	wave_label.add_theme_color_override("font_color", Color(0.9, 0.8, 0.2))
+	wave_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	wave_container.add_child(wave_label)
+
+	# Connect to GameState wave signal
+	if GameState:
+		GameState.wave_started.connect(_on_wave_started)
+
+
+func _on_wave_started(wave_number: int) -> void:
+	current_wave = wave_number
+	wave_label.text = "WAVE %d" % wave_number
+
+	# Flash effect
+	var tween := wave_container.create_tween()
+	tween.tween_property(wave_container, "modulate", Color(2, 2, 2), 0.1)
+	tween.tween_property(wave_container, "modulate", Color.WHITE, 0.3)
+
+	# Show wave announcement popup
+	_show_wave_announcement(wave_number)
+
+
+func _show_wave_announcement(wave_number: int) -> void:
+	var announce := Label.new()
+	announce.text = "WAVE %d" % wave_number
+	announce.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	announce.set_anchors_preset(Control.PRESET_CENTER)
+	announce.position = Vector2(-200, -100)
+	announce.size = Vector2(400, 100)
+	announce.add_theme_font_size_override("font_size", 48)
+	announce.add_theme_color_override("font_color", Color(1, 0.9, 0.3))
+	announce.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.8))
+	announce.add_theme_constant_override("shadow_offset_x", 3)
+	announce.add_theme_constant_override("shadow_offset_y", 3)
+	announce.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(announce)
+
+	# Animate in and out
+	announce.modulate.a = 0
+	var tween := announce.create_tween()
+	tween.tween_property(announce, "modulate:a", 1.0, 0.2)
+	tween.tween_interval(1.5)
+	tween.tween_property(announce, "modulate:a", 0.0, 0.5)
+	tween.tween_callback(announce.queue_free)
+
+
+# ============================================
+# EXTRACTION DISPLAY
+# ============================================
+
+func _build_extraction_display() -> void:
+	extraction_container = Control.new()
+	extraction_container.set_anchors_preset(Control.PRESET_CENTER)
+	extraction_container.position = Vector2(-150, 80)
+	extraction_container.size = Vector2(300, 60)
+	extraction_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	extraction_container.visible = false
+	root.add_child(extraction_container)
+
+	# Background
+	var bg := ColorRect.new()
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bg.color = Color(0.1, 0.15, 0.1, 0.9)
+	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	extraction_container.add_child(bg)
+
+	# Border
+	var border := ColorRect.new()
+	border.set_anchors_preset(Control.PRESET_FULL_RECT)
+	border.position = Vector2(-2, -2)
+	border.size = Vector2(304, 64)
+	border.color = Color(0.3, 0.8, 0.3, 0.8)
+	border.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	border.z_index = -1
+	extraction_container.add_child(border)
+
+	# Label
+	extraction_label = Label.new()
+	extraction_label.text = "EXTRACTING..."
+	extraction_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	extraction_label.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	extraction_label.position.y = 8
+	extraction_label.add_theme_font_size_override("font_size", 16)
+	extraction_label.add_theme_color_override("font_color", Color(0.3, 0.9, 0.3))
+	extraction_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	extraction_container.add_child(extraction_label)
+
+	# Progress bar
+	extraction_progress = ProgressBar.new()
+	extraction_progress.position = Vector2(20, 35)
+	extraction_progress.size = Vector2(260, 15)
+	extraction_progress.min_value = 0.0
+	extraction_progress.max_value = 1.0
+	extraction_progress.value = 0.0
+	extraction_progress.show_percentage = false
+	extraction_progress.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	extraction_container.add_child(extraction_progress)
+
+	# Style the progress bar
+	var bg_style := StyleBoxFlat.new()
+	bg_style.bg_color = Color(0.1, 0.1, 0.12)
+	bg_style.set_corner_radius_all(3)
+	extraction_progress.add_theme_stylebox_override("background", bg_style)
+
+	var fill_style := StyleBoxFlat.new()
+	fill_style.bg_color = Color(0.3, 0.9, 0.3)
+	fill_style.set_corner_radius_all(3)
+	extraction_progress.add_theme_stylebox_override("fill", fill_style)
+
+	# Connect to GameState extraction signals
+	if GameState:
+		if GameState.has_signal("extraction_available"):
+			GameState.extraction_available.connect(_on_extraction_available)
+		if GameState.has_signal("extraction_started"):
+			GameState.extraction_started.connect(_on_extraction_started)
+		if GameState.has_signal("extraction_cancelled"):
+			GameState.extraction_cancelled.connect(_on_extraction_cancelled)
+		if GameState.has_signal("player_extracted"):
+			GameState.player_extracted.connect(_on_player_extracted)
+
+
+func _on_extraction_available() -> void:
+	# Show extraction available notification
+	var notify := Label.new()
+	notify.text = "EXTRACTION AVAILABLE"
+	notify.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	notify.set_anchors_preset(Control.PRESET_CENTER)
+	notify.position = Vector2(-200, 50)
+	notify.size = Vector2(400, 50)
+	notify.add_theme_font_size_override("font_size", 24)
+	notify.add_theme_color_override("font_color", Color(0.3, 0.9, 0.3))
+	notify.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(notify)
+
+	var tween := notify.create_tween()
+	tween.tween_property(notify, "modulate:a", 1.0, 0.2)
+	tween.tween_interval(3.0)
+	tween.tween_property(notify, "modulate:a", 0.0, 0.5)
+	tween.tween_callback(notify.queue_free)
+
+
+func start_extraction(duration: float) -> void:
+	extraction_active = true
+	extraction_time = 0.0
+	extraction_max_time = duration
+	extraction_container.visible = true
+	extraction_progress.value = 0.0
+
+
+func cancel_extraction() -> void:
+	extraction_active = false
+	extraction_container.visible = false
+
+
+func complete_extraction() -> void:
+	extraction_active = false
+	extraction_label.text = "EXTRACTED!"
+	extraction_progress.value = 1.0
+
+	var tween := extraction_container.create_tween()
+	tween.tween_interval(1.0)
+	tween.tween_property(extraction_container, "modulate:a", 0.0, 0.5)
+	tween.tween_callback(func(): extraction_container.visible = false; extraction_container.modulate.a = 1.0)
+
+
+func _update_extraction(delta: float) -> void:
+	if not extraction_active:
+		return
+
+	extraction_time += delta
+	var progress: float = extraction_time / extraction_max_time
+	extraction_progress.value = clampf(progress, 0.0, 1.0)
+
+	# Update label with countdown
+	var remaining: float = extraction_max_time - extraction_time
+	extraction_label.text = "EXTRACTING... %.1fs" % maxf(remaining, 0.0)
+
+
+func _on_extraction_started(peer_id: int, _zone_name: String, duration: float) -> void:
+	# Only show for local player
+	var local_peer := NetworkManager.local_peer_id if NetworkManager else 1
+	if peer_id == local_peer:
+		start_extraction(duration)
+
+
+func _on_extraction_cancelled(peer_id: int, _reason: String) -> void:
+	# Only handle for local player
+	var local_peer := NetworkManager.local_peer_id if NetworkManager else 1
+	if peer_id == local_peer:
+		cancel_extraction()
+
+
+func _on_player_extracted(peer_id: int) -> void:
+	# Only handle for local player
+	var local_peer := NetworkManager.local_peer_id if NetworkManager else 1
+	if peer_id == local_peer:
+		complete_extraction()

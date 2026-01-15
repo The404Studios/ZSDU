@@ -17,6 +17,8 @@ signal barricade_destroyed(nail_id: int)
 signal hit_confirmed(peer_id: int, hit_data: Dictionary)
 signal game_over(reason: String, victory: bool)
 signal extraction_available()
+signal extraction_started(peer_id: int, zone_name: String, duration: float)
+signal extraction_cancelled(peer_id: int, reason: String)
 signal player_extracted(peer_id: int)
 signal sigil_damaged(damage: float, current_health: float, max_health: float)
 signal sigil_corrupted(corruption_count: int)
@@ -280,6 +282,10 @@ func handle_event(event_type: String, event_data: Dictionary) -> void:
 			_handle_game_over_event(event_data)
 		"extraction_unlocked":
 			_handle_extraction_unlocked_event(event_data)
+		"extraction_started":
+			_handle_extraction_started_event(event_data)
+		"extraction_cancelled":
+			_handle_extraction_cancelled_event(event_data)
 		"player_extracted":
 			_handle_player_extracted_event(event_data)
 		"sigil_damaged":
@@ -308,6 +314,27 @@ func _handle_extraction_unlocked_event(event_data: Dictionary) -> void:
 	print("[GameState] Extraction unlocked at wave %d!" % wave)
 
 	extraction_available.emit()
+
+
+## Handle extraction started event (client-side)
+func _handle_extraction_started_event(event_data: Dictionary) -> void:
+	var peer_id: int = event_data.get("peer_id", -1)
+	var zone_name: String = event_data.get("zone", "Extraction")
+	var duration: float = event_data.get("time", 5.0)
+
+	print("[GameState] Player %d started extraction at %s" % [peer_id, zone_name])
+
+	extraction_started.emit(peer_id, zone_name, duration)
+
+
+## Handle extraction cancelled event (client-side)
+func _handle_extraction_cancelled_event(event_data: Dictionary) -> void:
+	var peer_id: int = event_data.get("peer_id", -1)
+	var reason: String = event_data.get("reason", "Cancelled")
+
+	print("[GameState] Player %d extraction cancelled: %s" % [peer_id, reason])
+
+	extraction_cancelled.emit(peer_id, reason)
 
 
 ## Handle player extracted event (client-side)
