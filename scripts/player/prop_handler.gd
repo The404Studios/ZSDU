@@ -12,6 +12,12 @@ class_name PropHandler
 signal prop_picked_up(prop_id: int)
 signal prop_dropped(prop_id: int)
 signal nail_placed(nail_id: int)
+signal carrying_state_changed(is_carrying: bool, prop_mass: float)
+
+# Carry speed penalties
+const CARRY_SPEED_MULT := 0.6  # 60% speed when carrying
+const CARRY_NO_SPRINT := true  # Can't sprint while carrying
+const CARRY_NO_JUMP := true    # Can't jump while carrying
 
 # Owner reference
 var owner_player: PlayerController = null
@@ -20,6 +26,7 @@ var owner_camera: Camera3D = null
 # Currently held prop (client prediction)
 var held_prop_id: int = -1
 var is_holding := false
+var held_prop_mass: float = 1.0  # Mass affects speed penalty
 
 # Rotation input state
 var rotation_input := Vector3.ZERO
@@ -230,8 +237,7 @@ func _request_pickup(prop_id: int) -> void:
 	})
 
 	# Optimistic: assume success
-	held_prop_id = prop_id
-	is_holding = true
+	_set_carrying(true, prop_id)
 
 
 func _request_drop() -> void:
@@ -240,8 +246,7 @@ func _request_drop() -> void:
 	})
 
 	var dropped_id := held_prop_id
-	held_prop_id = -1
-	is_holding = false
+	_set_carrying(false)
 	prop_dropped.emit(dropped_id)
 
 
@@ -257,8 +262,7 @@ func _request_throw() -> void:
 	})
 
 	var thrown_id := held_prop_id
-	held_prop_id = -1
-	is_holding = false
+	_set_carrying(false)
 	prop_dropped.emit(thrown_id)
 
 
@@ -304,36 +308,70 @@ func _update_interaction_feedback() -> void:
 
 ## Called when server confirms pickup
 func on_pickup_confirmed(prop_id: int) -> void:
-	held_prop_id = prop_id
-	is_holding = true
+	_set_carrying(true, prop_id)
 	prop_picked_up.emit(prop_id)
 
 
 ## Called when server rejects pickup
 func on_pickup_rejected() -> void:
-	held_prop_id = -1
-	is_holding = false
+	_set_carrying(false)
 
 
 ## Called when server confirms drop/release
 func on_drop_confirmed() -> void:
 	var old_id := held_prop_id
-	held_prop_id = -1
-	is_holding = false
+	_set_carrying(false)
 	prop_dropped.emit(old_id)
 
 
 ## Called when prop is forcibly taken (by server or another event)
 func on_prop_lost() -> void:
-	held_prop_id = -1
-	is_holding = false
+	_set_carrying(false)
 
 
 ## Sync with server state
 func sync_held_state(prop_id: int) -> void:
 	if prop_id >= 0:
-		held_prop_id = prop_id
-		is_holding = true
+		_set_carrying(true, prop_id)
 	else:
-		held_prop_id = -1
-		is_holding = false
+		_set_carrying(false)
+
+
+## Set carrying state and emit signal for movement penalties
+func _set_carrying(carrying: bool, prop_id: int = -1) -> void:
+	var was_holding := is_holding
+	is_holding = carrying
+	held_prop_id = prop_id if carrying else -1
+
+	# Get prop mass for speed calculations
+	if carrying and prop_id >= 0 and GameState and prop_id in GameState.props:
+		var prop: Node = GameState.props[prop_id]
+		if prop is RigidBody3D:
+			held_prop_mass = prop.mass
+		else:
+			held_prop_mass = 1.0
+	else:
+		held_prop_mass = 1.0
+
+	# Notify player of state change for movement penalties
+	if was_holding != carrying:
+		carrying_state_changed.emit(carrying, held_prop_mass)
+
+
+## Get speed multiplier based on carrying state
+func get_carry_speed_mult() -> float:
+	if is_holding:
+		# Heavier props = slower (clamped between 0.4 and 0.7)
+		var mass_factor := clampf(1.0 - (held_prop_mass - 1.0) * 0.1, 0.4, 0.7)
+		return CARRY_SPEED_MULT * mass_factor
+	return 1.0
+
+
+## Check if player can sprint (can't while carrying)
+func can_sprint() -> bool:
+	return not (is_holding and CARRY_NO_SPRINT)
+
+
+## Check if player can jump (can't while carrying)
+func can_jump() -> bool:
+	return not (is_holding and CARRY_NO_JUMP)

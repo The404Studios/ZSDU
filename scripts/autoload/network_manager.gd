@@ -549,15 +549,13 @@ func _request_registration(client_info: Dictionary) -> void:
 	_send_full_world_snapshot.rpc_id(sender_id, _serialize_full_world_state())
 
 
-## Claim spawn assignment from backend (server-only)
+## Claim spawn assignment from backend (server-only) with retry logic
 func _claim_spawn_async(peer_id: int, player_id: String, lobby_id: String) -> void:
 	if not HeadlessServer or not HeadlessServer.is_headless:
 		return
 
-	# Create HTTP request to backend
-	var http := HTTPRequest.new()
-	http.timeout = 5.0
-	add_child(http)
+	const MAX_RETRIES := 3
+	const BASE_TIMEOUT := 10.0  # Increased from 5s
 
 	var url := BackendConfig.get_http_url() + "/lobby/claim_spawn"
 	var body := JSON.stringify({
@@ -566,34 +564,57 @@ func _claim_spawn_async(peer_id: int, player_id: String, lobby_id: String) -> vo
 	})
 	var headers := ["Content-Type: application/json"]
 
-	var error := http.request(url, headers, HTTPClient.METHOD_POST, body)
-	if error != OK:
+	for attempt in range(MAX_RETRIES):
+		var http := HTTPRequest.new()
+		http.timeout = BASE_TIMEOUT
+		add_child(http)
+
+		var error := http.request(url, headers, HTTPClient.METHOD_POST, body)
+		if error != OK:
+			http.queue_free()
+			push_warning("[Server] Failed to claim spawn for %s (attempt %d/%d)" % [player_id, attempt + 1, MAX_RETRIES])
+			if attempt < MAX_RETRIES - 1:
+				await get_tree().create_timer(2.0 * (attempt + 1)).timeout  # Exponential backoff
+			continue
+
+		var result = await http.request_completed
 		http.queue_free()
-		push_warning("[Server] Failed to claim spawn for %s" % player_id)
-		return
 
-	var result = await http.request_completed
-	http.queue_free()
+		if result[0] != HTTPRequest.RESULT_SUCCESS:
+			push_warning("[Server] Claim spawn network error for %s (attempt %d/%d): result=%d" % [
+				player_id, attempt + 1, MAX_RETRIES, result[0]
+			])
+			if attempt < MAX_RETRIES - 1:
+				await get_tree().create_timer(2.0 * (attempt + 1)).timeout
+			continue
 
-	if result[0] != HTTPRequest.RESULT_SUCCESS or result[1] < 200 or result[1] >= 300:
-		push_warning("[Server] Claim spawn HTTP error for %s" % player_id)
-		return
+		if result[1] < 200 or result[1] >= 300:
+			push_warning("[Server] Claim spawn HTTP %d for %s (attempt %d/%d)" % [
+				result[1], player_id, attempt + 1, MAX_RETRIES
+			])
+			if attempt < MAX_RETRIES - 1:
+				await get_tree().create_timer(2.0 * (attempt + 1)).timeout
+			continue
 
-	var json := JSON.new()
-	if json.parse(result[3].get_string_from_utf8()) != OK:
-		return
+		var json := JSON.new()
+		if json.parse(result[3].get_string_from_utf8()) != OK:
+			push_warning("[Server] Invalid JSON in spawn claim response for %s" % player_id)
+			continue
 
-	var data: Dictionary = json.data if json.data is Dictionary else {}
+		var data: Dictionary = json.data if json.data is Dictionary else {}
 
-	# Update spawn registry with server-authoritative data
-	if peer_id in HeadlessServer.player_spawn_registry:
-		HeadlessServer.player_spawn_registry[peer_id]["group"] = data.get("groupName", "")
-		HeadlessServer.player_spawn_registry[peer_id]["index"] = data.get("spawnIndex", 0)
-		print("[Server] Claimed spawn for peer %d: group=%s, index=%d" % [
-			peer_id,
-			data.get("groupName", ""),
-			data.get("spawnIndex", 0)
-		])
+		# Update spawn registry with server-authoritative data
+		if peer_id in HeadlessServer.player_spawn_registry:
+			HeadlessServer.player_spawn_registry[peer_id]["group"] = data.get("groupName", "")
+			HeadlessServer.player_spawn_registry[peer_id]["index"] = data.get("spawnIndex", 0)
+			print("[Server] Claimed spawn for peer %d: group=%s, index=%d" % [
+				peer_id,
+				data.get("groupName", ""),
+				data.get("spawnIndex", 0)
+			])
+		return  # Success!
+
+	push_error("[Server] Failed to claim spawn for %s after %d attempts" % [player_id, MAX_RETRIES])
 
 
 @rpc("authority", "reliable")

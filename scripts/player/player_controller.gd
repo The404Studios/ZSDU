@@ -131,6 +131,13 @@ func _setup_local_player() -> void:
 		add_child(prop_handler)
 		prop_handler.initialize(self)
 
+		# Connect prop handler to movement controller for carry penalties
+		if movement_controller:
+			movement_controller.prop_handler = prop_handler
+
+		# Initialize hammer (all players spawn with hammer for barricading)
+		_setup_hammer()
+
 		# Initialize weapon manager (attached to camera pivot for first-person view)
 		weapon_manager = WeaponManager.new()
 		weapon_manager.name = "WeaponManager"
@@ -151,6 +158,25 @@ func _register_raid_with_server() -> void:
 	# Called by client to send their raid info to server
 	if RaidManager:
 		RaidManager.client_register_raid()
+
+
+## Setup hammer tool (all players spawn with one)
+func _setup_hammer() -> void:
+	var HammerScript: GDScript = null
+	if ResourceLoader.exists("res://scripts/weapons/hammer.gd"):
+		HammerScript = load("res://scripts/weapons/hammer.gd")
+
+	if HammerScript:
+		var hammer: Hammer = HammerScript.new()
+		hammer.name = "Hammer"
+		add_child(hammer)
+		hammer.initialize(self)
+
+		# Store reference using meta for input handling
+		set_meta("hammer", hammer)
+		print("[Player] Hammer equipped")
+	else:
+		push_warning("[Player] Hammer script not found")
 
 
 ## Setup visual weapons from inventory runtime
