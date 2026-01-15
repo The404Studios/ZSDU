@@ -534,8 +534,7 @@ func _setup_hud_connections() -> void:
 	var animated_hud: AnimatedHUD = null
 
 	if hud and hud is AnimatedHUD:
-		@warning_ignore("unsafe_cast")
-		animated_hud = hud
+		animated_hud = hud as AnimatedHUD
 	else:
 		# Look for HUD in UI layer
 		var root_hud := get_node_or_null("/root/AnimatedHUD")
