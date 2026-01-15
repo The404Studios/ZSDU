@@ -67,6 +67,10 @@ var current_weapon_name := "VECTOR"
 # Buff tracking
 var active_buffs: Array[Dictionary] = []
 
+# XP popup tracking
+var xp_popup_container: Control
+var xp_popups: Array[Dictionary] = []
+
 # Connection tracking
 var _connected_player: PlayerController = null
 
@@ -74,6 +78,7 @@ var _connected_player: PlayerController = null
 func _ready() -> void:
 	layer = 10
 	_build_ui()
+	_connect_network_signals()
 
 
 func _process(delta: float) -> void:
@@ -81,6 +86,7 @@ func _process(delta: float) -> void:
 	_update_vignette(delta)
 	_update_from_player()
 	_update_buffs()
+	_update_xp_popups(delta)
 
 
 # ============================================
@@ -98,6 +104,7 @@ func _build_ui() -> void:
 	_build_ammo_display()
 	_build_crosshair()
 	_build_vignette()
+	_build_xp_popup_container()
 
 
 func _build_bottom_left() -> void:
@@ -714,3 +721,87 @@ func _update_buffs() -> void:
 
 	if changed:
 		_update_buff_visuals()
+
+
+# ============================================
+# XP POPUP SYSTEM
+# ============================================
+
+func _connect_network_signals() -> void:
+	if NetworkManager and NetworkManager.has_signal("xp_gained"):
+		NetworkManager.xp_gained.connect(_on_xp_gained)
+
+
+func _build_xp_popup_container() -> void:
+	xp_popup_container = Control.new()
+	xp_popup_container.set_anchors_preset(Control.PRESET_CENTER)
+	xp_popup_container.position = Vector2(0, -150)
+	xp_popup_container.size = Vector2(200, 100)
+	xp_popup_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(xp_popup_container)
+
+
+func _on_xp_gained(data: Dictionary) -> void:
+	var amount: int = data.get("amount", 0)
+	var source: String = data.get("source", "")
+	var zombie_type: String = data.get("zombie_type", "")
+
+	if amount > 0:
+		show_xp_popup(amount, zombie_type)
+
+
+func show_xp_popup(amount: int, source: String = "") -> void:
+	# Create popup label
+	var popup := Label.new()
+	popup.text = "+%d XP" % amount
+	if source != "":
+		popup.text += " (%s)" % source
+
+	popup.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	popup.add_theme_font_size_override("font_size", 18)
+	popup.add_theme_color_override("font_color", Color(0.9, 0.8, 0.2))  # Gold color
+
+	# Add shadow/outline
+	popup.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.8))
+	popup.add_theme_constant_override("shadow_offset_x", 2)
+	popup.add_theme_constant_override("shadow_offset_y", 2)
+
+	popup.position = Vector2(100 - popup.size.x / 2, 50)
+	popup.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	xp_popup_container.add_child(popup)
+
+	# Track popup for animation
+	xp_popups.append({
+		"label": popup,
+		"lifetime": 0.0,
+		"max_lifetime": 2.0
+	})
+
+	# Shift existing popups up
+	for i in range(xp_popups.size() - 2, -1, -1):
+		var existing: Dictionary = xp_popups[i]
+		var label: Label = existing.label
+		label.position.y -= 25
+
+
+func _update_xp_popups(delta: float) -> void:
+	for i in range(xp_popups.size() - 1, -1, -1):
+		var popup: Dictionary = xp_popups[i]
+		popup.lifetime += delta
+
+		var label: Label = popup.label
+		if not is_instance_valid(label):
+			xp_popups.remove_at(i)
+			continue
+
+		# Fade out over time
+		var progress: float = popup.lifetime / popup.max_lifetime
+		label.modulate.a = 1.0 - progress
+
+		# Float upward
+		label.position.y -= delta * 30.0
+
+		# Remove when done
+		if popup.lifetime >= popup.max_lifetime:
+			label.queue_free()
+			xp_popups.remove_at(i)

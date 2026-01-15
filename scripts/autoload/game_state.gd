@@ -508,8 +508,20 @@ func _kill_zombie_local(zombie_id: int) -> void:
 	zombie_killed.emit(zombie_id)
 
 
+## XP values per zombie type
+const ZOMBIE_XP_VALUES := {
+	"walker": 10,
+	"runner": 15,
+	"crawler": 12,
+	"bloater": 25,
+	"tank": 50,
+	"screamer": 20,
+	"spitter": 18,
+}
+
+
 ## Kill a zombie (server-side)
-func kill_zombie(zombie_id: int) -> void:
+func kill_zombie(zombie_id: int, killer_peer_id: int = -1) -> void:
 	if not NetworkManager.is_authority():
 		return
 
@@ -534,14 +546,43 @@ func kill_zombie(zombie_id: int) -> void:
 		zombies.erase(zombie_id)
 		wave_zombies_killed += 1
 
+		# Grant XP to killer
+		var xp_value: int = ZOMBIE_XP_VALUES.get(zombie_type, 10)
+		if killer_peer_id > 0:
+			_grant_kill_xp(killer_peer_id, xp_value, zombie_type)
+
 		# Broadcast zombie death to all clients
 		NetworkManager.broadcast_event.rpc("zombie_killed", {
 			"zombie_id": zombie_id,
 			"position": zombie_pos,
-			"zombie_type": zombie_type
+			"zombie_type": zombie_type,
+			"killer_id": killer_peer_id,
+			"xp_value": xp_value
 		})
 
 		zombie_killed.emit(zombie_id)
+
+
+## Grant XP to a player for killing a zombie (server-side)
+func _grant_kill_xp(peer_id: int, xp: int, zombie_type: String) -> void:
+	if peer_id not in players:
+		return
+
+	var player: Node3D = players[peer_id]
+	if not is_instance_valid(player):
+		return
+
+	# Grant XP through player's attribute system
+	if player.has_method("grant_xp"):
+		player.grant_xp(xp)
+
+	# Notify the client to show XP gain popup
+	if NetworkManager:
+		NetworkManager.send_to_peer.rpc_id(peer_id, "xp_gained", {
+			"amount": xp,
+			"source": "kill",
+			"zombie_type": zombie_type
+		})
 
 
 # ============================================
@@ -1165,7 +1206,7 @@ func _perform_raycast_hit(peer_id: int, origin: Vector3, direction: Vector3, dam
 				damage *= 2.0  # Headshot multiplier
 				hit_data["damage"] = damage
 
-		_damage_zombie(zombie_id, damage, hit_position)
+		_damage_zombie(zombie_id, damage, hit_position, peer_id)
 
 	elif collider.is_in_group("players"):
 		# Friendly fire check (disabled by default)
@@ -1191,7 +1232,7 @@ func _perform_raycast_hit(peer_id: int, origin: Vector3, direction: Vector3, dam
 
 
 ## Damage a zombie (server-side)
-func _damage_zombie(zombie_id: int, damage: float, hit_position: Vector3) -> void:
+func _damage_zombie(zombie_id: int, damage: float, hit_position: Vector3, killer_peer_id: int = -1) -> void:
 	if zombie_id not in zombies:
 		return
 
@@ -1205,7 +1246,7 @@ func _damage_zombie(zombie_id: int, damage: float, hit_position: Vector3) -> voi
 	# Check if zombie died
 	var zombie_health: float = zombie.health if "health" in zombie else 0.0
 	if zombie_health <= 0:
-		kill_zombie(zombie_id)
+		kill_zombie(zombie_id, killer_peer_id)
 
 
 ## Damage a player (server-side, for friendly fire if enabled)
@@ -1286,7 +1327,7 @@ func _handle_melee_attack(peer_id: int, data: Dictionary) -> void:
 		if zombie_id >= 0:
 			hit_data["target_type"] = "zombie"
 			hit_data["target_id"] = zombie_id
-			_damage_zombie(zombie_id, damage, server_hit_pos)
+			_damage_zombie(zombie_id, damage, server_hit_pos, peer_id)
 
 	# Broadcast hit confirmation
 	if NetworkManager:

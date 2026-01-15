@@ -663,6 +663,25 @@ func broadcast_event(event_type: String, event_data: Dictionary) -> void:
 	GameState.handle_event(event_type, event_data)
 
 
+@rpc("authority", "reliable")
+func send_to_peer(event_type: String, event_data: Dictionary) -> void:
+	# Called via rpc_id() to send to a specific peer
+	_handle_peer_event(event_type, event_data)
+
+
+## Handle event sent specifically to this peer
+func _handle_peer_event(event_type: String, event_data: Dictionary) -> void:
+	match event_type:
+		"xp_gained":
+			xp_gained.emit(event_data)
+		_:
+			push_warning("[NetworkManager] Unknown peer event: %s" % event_type)
+
+
+## Signal for XP gain notifications
+signal xp_gained(data: Dictionary)
+
+
 @rpc("any_peer", "reliable")
 func request_action(action_type: String, action_data: Dictionary) -> void:
 	if not is_authority():

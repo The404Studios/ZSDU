@@ -94,7 +94,7 @@ func _setup_controllers() -> void:
 
 	# Attribute System (STR, AGI, END, INT, LCK)
 	attribute_system = AttributeSystem.new()
-	attribute_system.setup_default()
+	_load_character_progression()  # Load from saved data instead of defaults
 	attribute_system.derived_stats_updated.connect(_on_derived_stats_updated)
 	attribute_system.level_up.connect(_on_level_up)
 
@@ -522,3 +522,56 @@ func _on_equipment_stats_updated(total_stats: Dictionary) -> void:
 	if movement_controller:
 		movement_controller.equipment_speed_modifier = total_stats.get("speed_modifier", 1.0)
 		movement_controller.equipment_stamina_modifier = total_stats.get("stamina_modifier", 1.0)
+
+
+## Load character progression data from EconomyService
+func _load_character_progression() -> void:
+	if not attribute_system:
+		return
+
+	# Try to load from EconomyService (if logged in)
+	if EconomyService and EconomyService.is_logged_in:
+		var saved_data: Dictionary = EconomyService.get_character_data()
+
+		# Load level and XP
+		attribute_system.level = saved_data.get("level", 1)
+		attribute_system.experience = saved_data.get("experience", 0)
+		attribute_system.attribute_points = saved_data.get("attribute_points", 5)
+
+		# Load base attributes
+		var base_attrs: Dictionary = saved_data.get("base_attributes", {})
+		if not base_attrs.is_empty():
+			for attr_name in base_attrs:
+				var attr_enum := _attr_name_to_enum(attr_name)
+				if attr_enum >= 0:
+					attribute_system.base_attributes[attr_enum] = base_attrs[attr_name]
+
+		attribute_system._recalculate_derived_stats()
+		print("[Player] Loaded character progression: Level %d, XP %d" % [
+			attribute_system.level,
+			attribute_system.experience
+		])
+	else:
+		# No saved data - use defaults
+		attribute_system.setup_default()
+
+
+## Convert attribute name string to enum
+func _attr_name_to_enum(name: String) -> int:
+	match name.to_lower():
+		"strength": return AttributeSystem.Attribute.STRENGTH
+		"agility": return AttributeSystem.Attribute.AGILITY
+		"endurance": return AttributeSystem.Attribute.ENDURANCE
+		"intellect": return AttributeSystem.Attribute.INTELLECT
+		"luck": return AttributeSystem.Attribute.LUCK
+	return -1
+
+
+## Grant XP to player (called after kills, objectives, etc.)
+func grant_xp(amount: int) -> void:
+	if attribute_system:
+		attribute_system.add_experience(amount)
+
+	# Also persist to EconomyService
+	if EconomyService and EconomyService.is_logged_in:
+		EconomyService.add_experience(amount)

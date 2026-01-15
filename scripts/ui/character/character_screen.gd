@@ -503,12 +503,75 @@ func _create_footer(parent: Control) -> void:
 
 
 func _initialize_systems() -> void:
-	# Create or get skill system
+	# Create skill system and load saved data
 	skill_system = SkillSystem.new()
 
-	# Create or get attribute system
+	# Create attribute system
 	attribute_system = AttributeSystem.new()
-	attribute_system.setup_default()
+
+	# Load saved character data from EconomyService
+	if EconomyService and EconomyService.is_logged_in:
+		var saved_data: Dictionary = EconomyService.get_character_data()
+		_apply_saved_data(saved_data)
+	else:
+		# No saved data - use defaults
+		attribute_system.setup_default()
+
+
+## Apply saved character data to systems
+func _apply_saved_data(data: Dictionary) -> void:
+	# Load attributes
+	attribute_system.level = data.get("level", 1)
+	attribute_system.experience = data.get("experience", 0)
+	attribute_system.attribute_points = data.get("attribute_points", 5)
+
+	var base_attrs: Dictionary = data.get("base_attributes", {})
+	if not base_attrs.is_empty():
+		for attr_name in base_attrs:
+			var attr_enum := _get_attribute_enum(attr_name)
+			if attr_enum >= 0:
+				attribute_system.base_attributes[attr_enum] = base_attrs[attr_name]
+
+	attribute_system._recalculate_derived_stats()
+
+	# Load skills
+	var skill_data: Dictionary = data.get("skill_data", {})
+	if not skill_data.is_empty():
+		skill_system.load_save_data(skill_data)
+	else:
+		# Set prestige level from saved data
+		skill_system.prestige_level = data.get("prestige_level", 0)
+
+
+## Convert attribute name string to enum
+func _get_attribute_enum(name: String) -> int:
+	match name.to_lower():
+		"strength": return AttributeSystem.Attribute.STRENGTH
+		"agility": return AttributeSystem.Attribute.AGILITY
+		"endurance": return AttributeSystem.Attribute.ENDURANCE
+		"intellect": return AttributeSystem.Attribute.INTELLECT
+		"luck": return AttributeSystem.Attribute.LUCK
+	return -1
+
+
+## Save character data to EconomyService
+func _save_character_data() -> void:
+	if not EconomyService or not EconomyService.is_logged_in:
+		return
+
+	# Build attributes dictionary
+	var attrs := {}
+	for attr in AttributeSystem.Attribute.values():
+		var name: String = AttributeSystem.ATTRIBUTE_NAMES[attr].to_lower()
+		attrs[name] = attribute_system.base_attributes.get(attr, 10)
+
+	EconomyService.update_attributes(attrs)
+	EconomyService.set_attribute_points(attribute_system.attribute_points)
+
+	# Save skill data
+	if skill_system:
+		var skill_data := skill_system.get_save_data()
+		EconomyService.update_skill_data(skill_data)
 
 
 func _connect_signals() -> void:
@@ -725,10 +788,12 @@ func _on_skill_pressed(category: SkillSystem.Category, skill_id: String) -> void
 
 func _on_skill_upgraded(_category: String, _skill_id: String, _new_level: int) -> void:
 	_refresh_skills_display()
+	_save_character_data()  # Persist skill upgrade
 
 
 func _on_skill_points_changed(_new_points: int) -> void:
 	_refresh_skills_display()
+	_save_character_data()  # Persist skill point change
 
 
 func _on_prestige_pressed() -> void:
@@ -739,21 +804,24 @@ func _on_prestige_pressed() -> void:
 func _on_prestige_changed(_new_level: int) -> void:
 	_refresh_skills_display()
 	_refresh_header()
+	_save_character_data()  # Persist prestige level
 
 
 func _on_subclass_unlocked(subclass_name: String) -> void:
 	_refresh_header()
-	# Could show notification
+	_save_character_data()  # Persist subclass unlock
 	print("[Character] Subclass unlocked: %s" % subclass_name)
 
 
 func _on_attribute_upgrade(attr: AttributeSystem.Attribute) -> void:
 	if attribute_system:
 		attribute_system.increase_attribute(attr)
+		_save_character_data()  # Persist attribute upgrade
 
 
 func _on_attribute_changed(_attribute: String, _old_value: int, _new_value: int) -> void:
 	_refresh_attributes_display()
+	_save_character_data()  # Persist attribute change
 
 
 func _on_derived_stats_updated(_stats: Dictionary) -> void:
