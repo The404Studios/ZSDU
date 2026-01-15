@@ -15,6 +15,7 @@ enum ZombieState {
 	PATH,
 	ATTACK_PLAYER,
 	ATTACK_NAIL,
+	ATTACK_RANGED,  # Spitter's ranged acid attack
 	STAGGER,
 	DEAD
 }
@@ -77,6 +78,13 @@ var is_attacking := false
 # Stagger
 var stagger_duration: float = 0.0
 
+# Spitter ranged attack
+var spitter_attack_range: float = 12.0  # Max range for spit attack
+var spitter_min_range: float = 4.0  # Min range (too close, melee instead)
+var spitter_spit_cooldown: float = 0.0
+const SPITTER_SPIT_INTERVAL: float = 3.0  # Time between spit attacks
+const SPITTER_SPIT_SPEED: float = 15.0  # Projectile speed
+
 # Group behavior (for horde optimization)
 var group_leader: ZombieController = null
 var is_group_leader := false
@@ -126,6 +134,8 @@ func _physics_process(delta: float) -> void:
 	state_timer += delta
 	path_update_timer += delta
 	attack_timer += delta
+	if spitter_spit_cooldown > 0:
+		spitter_spit_cooldown -= delta
 
 	# State machine
 	match current_state:
@@ -139,6 +149,8 @@ func _physics_process(delta: float) -> void:
 			_state_attack_player(delta)
 		ZombieState.ATTACK_NAIL:
 			_state_attack_nail(delta)
+		ZombieState.ATTACK_RANGED:
+			_state_attack_ranged(delta)
 		ZombieState.STAGGER:
 			_state_stagger(delta)
 
@@ -258,6 +270,15 @@ func _state_aggro(_delta: float) -> void:
 	# Screamer special: call for help when first aggroed
 	if zombie_type == ZombieType.SCREAMER and state_timer < 0.1:
 		_scream_for_help()
+
+	# Spitter special: check if should use ranged attack
+	if zombie_type == ZombieType.SPITTER:
+		var dist := global_position.distance_to(target_player.global_position)
+		if dist >= spitter_min_range and dist <= spitter_attack_range and spitter_spit_cooldown <= 0:
+			# Check line of sight to target
+			if _has_line_of_sight_to(target_player.global_position):
+				_change_state(ZombieState.ATTACK_RANGED)
+				return
 
 	target_position = target_player.global_position
 	_change_state(ZombieState.PATH)
@@ -546,6 +567,98 @@ func _perform_attack_nail() -> void:
 	is_attacking = false
 
 
+## ATTACK_RANGED - Spitter's ranged acid attack
+func _state_attack_ranged(delta: float) -> void:
+	if not is_instance_valid(target_player):
+		_change_state(ZombieState.IDLE)
+		return
+
+	# Face target
+	var to_target := target_player.global_position - global_position
+	to_target.y = 0
+	if to_target.length() > 0.1:
+		var target_angle := atan2(to_target.x, to_target.z)
+		rotation.y = lerp_angle(rotation.y, target_angle, 10.0 * delta)
+
+	# Stop moving while attacking
+	velocity.x = 0
+	velocity.z = 0
+
+	# Attack after short wind-up
+	if state_timer > 0.5 and not is_attacking:
+		_perform_ranged_attack()
+		spitter_spit_cooldown = SPITTER_SPIT_INTERVAL
+		_change_state(ZombieState.PATH)
+
+
+## Check line of sight to position
+func _has_line_of_sight_to(target_pos: Vector3) -> bool:
+	var space_state := get_world_3d().direct_space_state
+	var from := global_position + Vector3.UP * 1.0  # Eye height
+	var to := target_pos + Vector3.UP * 1.0  # Target's torso
+
+	var query := PhysicsRayQueryParameters3D.create(from, to)
+	query.collision_mask = 0b00000011  # Check world and player collision
+	query.exclude = [self]
+
+	var result := space_state.intersect_ray(query)
+
+	if not result:
+		return true  # No obstruction
+
+	# Check if we hit the target or something else
+	if result.collider == target_player:
+		return true
+
+	return false
+
+
+## Perform ranged acid spit attack
+func _perform_ranged_attack() -> void:
+	if not is_instance_valid(target_player):
+		return
+
+	is_attacking = true
+
+	# Calculate trajectory to target (with slight prediction)
+	var target_pos := target_player.global_position
+	var target_velocity: Vector3 = target_player.velocity if "velocity" in target_player else Vector3.ZERO
+
+	# Predict where target will be
+	var travel_time := global_position.distance_to(target_pos) / SPITTER_SPIT_SPEED
+	var predicted_pos := target_pos + target_velocity * travel_time * 0.5
+
+	var spawn_pos := global_position + Vector3.UP * 1.5 + (-global_basis.z * 0.5)
+	var direction := (predicted_pos + Vector3.UP - spawn_pos).normalized()
+
+	# Broadcast spit projectile event for clients to spawn visual
+	NetworkManager.broadcast_event.rpc("zombie_spit", {
+		"zombie_id": zombie_id,
+		"position": spawn_pos,
+		"direction": direction,
+		"speed": SPITTER_SPIT_SPEED,
+		"damage": damage
+	})
+
+	# Server-side hit detection (simplified - instant raycast with delay)
+	# In a full implementation, this would spawn an actual projectile
+	await get_tree().create_timer(travel_time).timeout
+
+	if is_instance_valid(target_player):
+		# Check if still in range and has LOS
+		var current_dist := global_position.distance_to(target_player.global_position)
+		if current_dist <= spitter_attack_range * 1.5:  # Allow some leeway
+			if target_player.has_method("take_damage"):
+				target_player.take_damage(damage, spawn_pos)
+				# Acid effect - could add DoT here
+				NetworkManager.broadcast_event.rpc("zombie_spit_hit", {
+					"position": target_player.global_position,
+					"target_peer": target_player.get("peer_id")
+				})
+
+	is_attacking = false
+
+
 ## Take damage (server-side)
 func take_damage(amount: float, hit_position: Vector3) -> void:
 	if not NetworkManager.is_authority():
@@ -577,6 +690,12 @@ func _die() -> void:
 		ZombieType.SCREAMER:
 			# Already called zombies when aggroed
 			pass
+		ZombieType.BOSS:
+			# Broadcast boss killed event for HUD celebration
+			NetworkManager.broadcast_event.rpc("boss_killed", {
+				"position": global_position,
+				"zombie_id": zombie_id
+			})
 
 	# Drop loot
 	_drop_loot()

@@ -55,6 +55,14 @@ var crosshair_lines: Array[ColorRect] = []
 # ============================================
 var vignette: ColorRect
 
+# ============================================
+# DAMAGE DIRECTION INDICATORS
+# ============================================
+var damage_indicator_container: Control
+var damage_indicators: Array[Control] = []
+const DAMAGE_INDICATOR_COUNT := 8  # 8 directions
+const DAMAGE_INDICATOR_FADE_TIME := 1.0
+
 # State
 var current_health := 100.0
 var max_health := 100.0
@@ -134,6 +142,7 @@ func _build_ui() -> void:
 	_build_ammo_display()
 	_build_crosshair()
 	_build_vignette()
+	_build_damage_indicators()
 	_build_wave_display()
 	_build_stats_display()
 	_build_extraction_display()
@@ -512,6 +521,101 @@ func _build_vignette() -> void:
 	vignette.color = Color(0.5, 0, 0, 0)
 	vignette.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(vignette)
+
+
+func _build_damage_indicators() -> void:
+	damage_indicator_container = Control.new()
+	damage_indicator_container.set_anchors_preset(Control.PRESET_CENTER)
+	damage_indicator_container.position = Vector2(-150, -150)
+	damage_indicator_container.size = Vector2(300, 300)
+	damage_indicator_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(damage_indicator_container)
+
+	# Create 8 directional indicators around center
+	for i in range(DAMAGE_INDICATOR_COUNT):
+		var angle := i * (TAU / DAMAGE_INDICATOR_COUNT)
+		var indicator := _create_damage_indicator(angle)
+		damage_indicator_container.add_child(indicator)
+		damage_indicators.append(indicator)
+
+
+func _create_damage_indicator(angle: float) -> Control:
+	var indicator := Control.new()
+	indicator.custom_minimum_size = Vector2(30, 80)
+	indicator.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	# Arrow-like shape using polygon or color rect
+	var arrow := ColorRect.new()
+	arrow.size = Vector2(20, 60)
+	arrow.position = Vector2(5, 10)
+	arrow.color = Color(0.9, 0.1, 0.1, 0.0)  # Start invisible
+	arrow.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	indicator.add_child(arrow)
+
+	# Position around the center (at distance from center)
+	var distance := 120.0
+	var center := Vector2(150, 150)
+	indicator.position = center + Vector2(cos(angle), sin(angle)) * distance - indicator.custom_minimum_size / 2
+	indicator.rotation = angle + PI / 2  # Point toward center
+
+	return indicator
+
+
+## Show damage indicator from a world position
+func show_damage_from_direction(damage_source_pos: Vector3) -> void:
+	if not _connected_player or not is_instance_valid(_connected_player):
+		return
+
+	var player_pos := _connected_player.global_position
+	var player_rot := _connected_player.look_yaw
+
+	# Calculate direction to damage source
+	var to_source := Vector2(
+		damage_source_pos.x - player_pos.x,
+		damage_source_pos.z - player_pos.z
+	)
+
+	if to_source.length() < 0.1:
+		return  # Too close, show all indicators
+
+	# Get angle from player's forward direction
+	var world_angle := atan2(to_source.y, to_source.x)
+	var relative_angle := world_angle - player_rot
+
+	# Normalize to 0-TAU
+	while relative_angle < 0:
+		relative_angle += TAU
+	while relative_angle >= TAU:
+		relative_angle -= TAU
+
+	# Find the closest indicator
+	var indicator_index := int(round(relative_angle / (TAU / DAMAGE_INDICATOR_COUNT))) % DAMAGE_INDICATOR_COUNT
+
+	# Also show adjacent indicators for a spread effect
+	_flash_damage_indicator(indicator_index, 1.0)
+	_flash_damage_indicator((indicator_index + 1) % DAMAGE_INDICATOR_COUNT, 0.5)
+	_flash_damage_indicator((indicator_index - 1 + DAMAGE_INDICATOR_COUNT) % DAMAGE_INDICATOR_COUNT, 0.5)
+
+
+func _flash_damage_indicator(index: int, intensity: float) -> void:
+	if index < 0 or index >= damage_indicators.size():
+		return
+
+	var indicator := damage_indicators[index]
+	var arrow := indicator.get_child(0) as ColorRect
+	if not arrow:
+		return
+
+	# Flash the indicator
+	arrow.color.a = intensity
+	var tween := arrow.create_tween()
+	tween.tween_property(arrow, "color:a", 0.0, DAMAGE_INDICATOR_FADE_TIME)
+
+
+## Show damage from all directions (explosion or unknown source)
+func show_damage_all_directions() -> void:
+	for i in range(DAMAGE_INDICATOR_COUNT):
+		_flash_damage_indicator(i, 0.7)
 
 
 func _style_bar(bar: ProgressBar, fill_color: Color) -> void:
@@ -977,8 +1081,49 @@ func _on_network_event(event_name: String, data: Dictionary) -> void:
 				var type_name := _zombie_type_to_name(zombie_type)
 				show_xp_popup(xp, type_name)
 		"zombie_explode":
-			# Could add screen shake here
-			pass
+			# Screen shake on explosion
+			var pos: Vector3 = data.get("position", Vector3.ZERO)
+			_do_screen_shake(0.3, 8.0)
+			show_damage_from_direction(pos)
+		"boss_killed":
+			# Celebration for defeating the boss
+			show_boss_killed()
+		"zombie_scream":
+			# Visual feedback for screamer alert
+			_show_scream_alert()
+		"player_damaged":
+			# Show damage direction indicator
+			var source_pos: Vector3 = data.get("source_position", Vector3.ZERO)
+			var target_peer: int = data.get("peer_id", 0)
+			var local_peer := multiplayer.get_unique_id() if multiplayer else 0
+			if target_peer == local_peer:
+				if source_pos != Vector3.ZERO:
+					show_damage_from_direction(source_pos)
+				else:
+					show_damage_all_directions()
+		"extraction_started":
+			# Show extraction UI
+			_show_extraction_started(data.get("zone_name", "Extract Zone"))
+		"extraction_progress":
+			# Update extraction progress
+			var progress: float = data.get("progress", 0.0)
+			var time_left: float = data.get("time_remaining", 0.0)
+			_update_extraction_progress(progress, time_left)
+		"extraction_complete":
+			# Show extraction complete
+			_show_extraction_complete()
+		"extraction_cancelled":
+			# Hide extraction UI
+			_hide_extraction_ui()
+		"zombie_spit":
+			# Spitter launched acid projectile - visual only on client
+			pass  # TODO: Spawn visual projectile effect
+		"zombie_spit_hit":
+			# Acid hit a player - show acid screen effect if local player
+			var target_peer: int = data.get("target_peer", 0)
+			var local_peer := multiplayer.get_unique_id() if multiplayer else 0
+			if target_peer == local_peer:
+				_show_acid_hit_effect()
 
 
 func _zombie_type_to_name(type: int) -> String:
@@ -1278,6 +1423,77 @@ func _on_player_extracted(peer_id: int) -> void:
 	var local_peer := NetworkManager.local_peer_id if NetworkManager else 1
 	if peer_id == local_peer:
 		complete_extraction()
+
+
+## Network event helper: show extraction started
+func _show_extraction_started(zone_name: String) -> void:
+	extraction_active = true
+	extraction_time = 0.0
+	extraction_container.visible = true
+	extraction_label.text = "EXTRACTING at %s..." % zone_name
+	extraction_progress.value = 0.0
+
+
+## Network event helper: update extraction progress
+func _update_extraction_progress(progress: float, time_left: float) -> void:
+	extraction_progress.value = clampf(progress, 0.0, 1.0)
+	extraction_label.text = "EXTRACTING... %.1fs" % maxf(time_left, 0.0)
+
+
+## Network event helper: show extraction complete
+func _show_extraction_complete() -> void:
+	extraction_active = false
+	extraction_label.text = "EXTRACTED!"
+	extraction_label.add_theme_color_override("font_color", Color(0.3, 1.0, 0.5))
+	extraction_progress.value = 1.0
+
+	# Show success popup
+	var success := Label.new()
+	success.text = "EXTRACTION SUCCESSFUL"
+	success.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	success.set_anchors_preset(Control.PRESET_CENTER)
+	success.position = Vector2(-200, -150)
+	success.size = Vector2(400, 50)
+	success.add_theme_font_size_override("font_size", 32)
+	success.add_theme_color_override("font_color", Color(0.3, 1.0, 0.5))
+	success.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.9))
+	success.add_theme_constant_override("shadow_offset_x", 3)
+	success.add_theme_constant_override("shadow_offset_y", 3)
+	success.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(success)
+
+	success.modulate.a = 0
+	success.scale = Vector2(0.5, 0.5)
+	success.pivot_offset = success.size / 2
+
+	var tween := success.create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(success, "modulate:a", 1.0, 0.2)
+	tween.tween_property(success, "scale", Vector2(1.0, 1.0), 0.3).set_trans(Tween.TRANS_BACK)
+	tween.set_parallel(false)
+	tween.tween_interval(3.0)
+	tween.tween_property(success, "modulate:a", 0.0, 0.5)
+	tween.tween_callback(success.queue_free)
+
+	# Hide extraction UI
+	var hide_tween := extraction_container.create_tween()
+	hide_tween.tween_interval(1.0)
+	hide_tween.tween_property(extraction_container, "modulate:a", 0.0, 0.5)
+	hide_tween.tween_callback(func():
+		extraction_container.visible = false
+		extraction_container.modulate.a = 1.0
+	)
+
+
+## Network event helper: hide extraction UI
+func _hide_extraction_ui() -> void:
+	extraction_active = false
+	var tween := extraction_container.create_tween()
+	tween.tween_property(extraction_container, "modulate:a", 0.0, 0.3)
+	tween.tween_callback(func():
+		extraction_container.visible = false
+		extraction_container.modulate.a = 1.0
+	)
 
 
 # ============================================
@@ -1592,13 +1808,13 @@ func update_minimap(player_pos: Vector3, player_rotation: float) -> void:
 
 
 func _update_minimap_markers(player_pos: Vector3) -> void:
-	# Get zombies in range
-	var zombies := get_tree().get_nodes_in_group("zombies")
 	var minimap_range := mini_map_frame.size.x * minimap_scale / 2
 
 	# Track which markers to keep
 	var active_ids: Array[int] = []
 
+	# Add zombie markers
+	var zombies := get_tree().get_nodes_in_group("zombies")
 	for zombie in zombies:
 		if not zombie is CharacterBody3D:
 			continue
@@ -1613,14 +1829,31 @@ func _update_minimap_markers(player_pos: Vector3) -> void:
 		var entity_id: int = zombie.get_instance_id()
 		active_ids.append(entity_id)
 
+		# Determine marker style based on zombie type
+		var marker_size := Vector2(4, 4)
+		var marker_color := Color(0.9, 0.2, 0.2)  # Red for regular zombies
+
+		# Check for boss zombie
+		if "zombie_type" in zombie:
+			var ztype: int = zombie.zombie_type
+			if ztype == 7:  # BOSS
+				marker_size = Vector2(8, 8)
+				marker_color = Color(0.9, 0.1, 0.5)  # Magenta for boss
+			elif ztype == 5:  # SCREAMER
+				marker_color = Color(1.0, 0.6, 0.2)  # Orange for screamer
+			elif ztype == 6:  # EXPLODER
+				marker_color = Color(1.0, 0.8, 0.0)  # Yellow for exploder
+
 		# Get or create marker
 		var marker: ColorRect
 		if entity_id in minimap_markers:
 			marker = minimap_markers[entity_id]
+			marker.size = marker_size
+			marker.color = marker_color
 		else:
 			marker = ColorRect.new()
-			marker.size = Vector2(4, 4)
-			marker.color = Color(0.9, 0.2, 0.2)  # Red for enemies
+			marker.size = marker_size
+			marker.color = marker_color
 			marker.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			mini_map_frame.add_child(marker)
 			minimap_markers[entity_id] = marker
@@ -1628,9 +1861,88 @@ func _update_minimap_markers(player_pos: Vector3) -> void:
 		# Position marker relative to center
 		var screen_offset := offset / minimap_scale
 		marker.position = Vector2(
-			mini_map_frame.size.x / 2 + screen_offset.x - 2,
-			mini_map_frame.size.y / 2 + screen_offset.y - 2
+			mini_map_frame.size.x / 2 + screen_offset.x - marker_size.x / 2,
+			mini_map_frame.size.y / 2 + screen_offset.y - marker_size.y / 2
 		)
+
+	# Add other player markers (blue)
+	var local_peer := multiplayer.get_unique_id() if multiplayer else 0
+	for peer_id in GameState.players:
+		if peer_id == local_peer:
+			continue  # Skip self
+
+		var other_player: Node3D = GameState.players[peer_id]
+		if not is_instance_valid(other_player):
+			continue
+
+		var other_pos: Vector3 = other_player.global_position
+		var offset := Vector2(other_pos.x - player_pos.x, other_pos.z - player_pos.z)
+		var distance := offset.length()
+
+		if distance > minimap_range:
+			continue
+
+		var entity_id: int = other_player.get_instance_id()
+		active_ids.append(entity_id)
+
+		# Get or create marker
+		var marker: ColorRect
+		if entity_id in minimap_markers:
+			marker = minimap_markers[entity_id]
+		else:
+			marker = ColorRect.new()
+			marker.size = Vector2(5, 5)
+			marker.color = Color(0.3, 0.6, 1.0)  # Blue for teammates
+			marker.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			mini_map_frame.add_child(marker)
+			minimap_markers[entity_id] = marker
+
+		# Position marker relative to center
+		var screen_offset := offset / minimap_scale
+		marker.position = Vector2(
+			mini_map_frame.size.x / 2 + screen_offset.x - 2.5,
+			mini_map_frame.size.y / 2 + screen_offset.y - 2.5
+		)
+
+	# Add extraction zone markers (if active)
+	if GameState.extraction_active:
+		var extraction_zones := get_tree().get_nodes_in_group("extraction_zones")
+		for zone in extraction_zones:
+			if not zone is Node3D:
+				continue
+
+			var zone_pos: Vector3 = zone.global_position
+			var offset := Vector2(zone_pos.x - player_pos.x, zone_pos.z - player_pos.z)
+			var distance := offset.length()
+
+			# Show extraction at longer range
+			if distance > minimap_range * 2:
+				continue
+
+			var entity_id: int = zone.get_instance_id()
+			active_ids.append(entity_id)
+
+			var marker: ColorRect
+			if entity_id in minimap_markers:
+				marker = minimap_markers[entity_id]
+			else:
+				marker = ColorRect.new()
+				marker.size = Vector2(10, 10)
+				marker.color = Color(0.2, 0.9, 0.4)  # Green for extraction
+				marker.mouse_filter = Control.MOUSE_FILTER_IGNORE
+				mini_map_frame.add_child(marker)
+				minimap_markers[entity_id] = marker
+
+			# Clamp to edge if out of minimap range
+			var screen_offset := offset / minimap_scale
+			var max_dist := mini_map_frame.size.x / 2 - 10
+			if screen_offset.length() > max_dist:
+				screen_offset = screen_offset.normalized() * max_dist
+
+			marker.position = Vector2(
+				mini_map_frame.size.x / 2 + screen_offset.x - 5,
+				mini_map_frame.size.y / 2 + screen_offset.y - 5
+			)
 
 	# Remove markers for entities no longer in range
 	for entity_id in minimap_markers.keys():
@@ -1796,3 +2108,72 @@ func show_boss_killed() -> void:
 	tween.tween_interval(2.0)
 	tween.tween_property(killed, "modulate:a", 0.0, 0.5)
 	tween.tween_callback(killed.queue_free)
+
+
+## Screen shake effect for explosions and impacts
+func _do_screen_shake(duration: float, intensity: float) -> void:
+	if not root:
+		return
+
+	var original_pos := root.position
+	var shake_tween := root.create_tween()
+	var steps := int(duration / 0.03)
+
+	for i in range(steps):
+		var offset := Vector2(
+			randf_range(-intensity, intensity),
+			randf_range(-intensity, intensity)
+		)
+		shake_tween.tween_property(root, "position", original_pos + offset, 0.03)
+
+	# Return to original position
+	shake_tween.tween_property(root, "position", original_pos, 0.05)
+
+
+## Show alert when screamer calls for reinforcements
+func _show_scream_alert() -> void:
+	var alert := Label.new()
+	alert.text = "SCREAMER ALERT!"
+	alert.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	alert.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	alert.position = Vector2(-150, 120)
+	alert.size = Vector2(300, 30)
+	alert.add_theme_font_size_override("font_size", 18)
+	alert.add_theme_color_override("font_color", Color(1, 0.6, 0.2))
+	alert.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.8))
+	alert.add_theme_constant_override("shadow_offset_x", 2)
+	alert.add_theme_constant_override("shadow_offset_y", 2)
+	alert.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(alert)
+
+	alert.modulate.a = 0
+	var tween := alert.create_tween()
+	# Pulse effect
+	tween.tween_property(alert, "modulate:a", 1.0, 0.1)
+	tween.tween_property(alert, "modulate", Color(1.5, 1.2, 1.0, 1.0), 0.1)
+	tween.tween_property(alert, "modulate", Color(1.0, 1.0, 1.0, 1.0), 0.1)
+	tween.tween_interval(1.0)
+	tween.tween_property(alert, "modulate:a", 0.0, 0.3)
+	tween.tween_callback(alert.queue_free)
+
+
+## Show acid hit screen effect (green tinge and damage indicators)
+func _show_acid_hit_effect() -> void:
+	# Create green acid overlay
+	var acid_overlay := ColorRect.new()
+	acid_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	acid_overlay.color = Color(0.2, 0.7, 0.1, 0.0)
+	acid_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(acid_overlay)
+
+	# Flash green then fade
+	var tween := acid_overlay.create_tween()
+	tween.tween_property(acid_overlay, "color:a", 0.35, 0.1)
+	tween.tween_property(acid_overlay, "color:a", 0.0, 0.8)
+	tween.tween_callback(acid_overlay.queue_free)
+
+	# Also show all-direction damage (acid splatter feel)
+	show_damage_all_directions()
+
+	# Small screen shake
+	_do_screen_shake(0.15, 4.0)

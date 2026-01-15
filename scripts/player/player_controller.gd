@@ -434,7 +434,7 @@ func _process_health_regen(delta: float) -> void:
 
 	# From attributes (endurance gives +0.1 HP/sec per point above base)
 	if attribute_system:
-		var derived := attribute_system.get_derived_stats()
+		var derived: Dictionary = attribute_system.get_derived_stats()
 		health_regen += derived.get("health_regen", 0.0)
 
 	# Apply regeneration

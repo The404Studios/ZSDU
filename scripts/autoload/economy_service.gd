@@ -221,7 +221,7 @@ func _load_character_cache() -> void:
 		return
 
 	# Only load if matching character ID
-	var cached_id := config.get_value("character", "id", "")
+	var cached_id: String = config.get_value("character", "id", "")
 	if cached_id == "" or (character_id != "" and cached_id != character_id):
 		return
 
@@ -231,11 +231,11 @@ func _load_character_cache() -> void:
 	character_data.prestige_level = config.get_value("progression", "prestige_level", 0)
 	character_data.total_xp = config.get_value("progression", "total_xp", 0)
 
-	var attrs := config.get_value("attributes", "base", {})
+	var attrs: Dictionary = config.get_value("attributes", "base", {})
 	if not attrs.is_empty():
 		character_data.base_attributes = attrs
 
-	var skills := config.get_value("skills", "data", {})
+	var skills: Dictionary = config.get_value("skills", "data", {})
 	if not skills.is_empty():
 		character_data.skill_data = skills
 
