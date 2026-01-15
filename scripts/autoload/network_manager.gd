@@ -22,6 +22,7 @@ signal player_left(peer_id: int)
 signal world_sync_complete
 signal connection_state_changed(state: ConnectionState)
 signal xp_gained(data: Dictionary)
+signal event_received(event_name: String, event_data: Dictionary)
 
 enum ConnectionState {
 	DISCONNECTED,
@@ -662,6 +663,8 @@ func broadcast_state_update(state: Dictionary) -> void:
 @rpc("authority", "reliable")
 func broadcast_event(event_type: String, event_data: Dictionary) -> void:
 	GameState.handle_event(event_type, event_data)
+	# Emit signal for UI components (HUD, etc.) to listen to
+	event_received.emit(event_type, event_data)
 
 
 @rpc("authority", "reliable")

@@ -577,6 +577,12 @@ func _die() -> void:
 		ZombieType.SCREAMER:
 			# Already called zombies when aggroed
 			pass
+		ZombieType.BOSS:
+			# Broadcast boss killed event for HUD celebration
+			NetworkManager.broadcast_event.rpc("boss_killed", {
+				"position": global_position,
+				"zombie_id": zombie_id
+			})
 
 	# Drop loot
 	_drop_loot()
