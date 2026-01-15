@@ -21,6 +21,7 @@ signal player_joined(peer_id: int)
 signal player_left(peer_id: int)
 signal world_sync_complete
 signal connection_state_changed(state: ConnectionState)
+signal xp_gained(data: Dictionary)
 
 enum ConnectionState {
 	DISCONNECTED,
@@ -676,10 +677,6 @@ func _handle_peer_event(event_type: String, event_data: Dictionary) -> void:
 			xp_gained.emit(event_data)
 		_:
 			push_warning("[NetworkManager] Unknown peer event: %s" % event_type)
-
-
-## Signal for XP gain notifications
-signal xp_gained(data: Dictionary)
 
 
 @rpc("any_peer", "reliable")
