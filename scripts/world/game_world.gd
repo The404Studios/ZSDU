@@ -13,7 +13,7 @@ extends Node3D
 @onready var props_container: Node = $Props
 @onready var spawn_points: Node = $SpawnPoints
 @onready var wave_manager: WaveManager = $WaveManager if has_node("WaveManager") else null
-@onready var hud: Control = $HUD if has_node("HUD") else null
+@onready var hud: Node = $HUD if has_node("HUD") else null
 
 # Sigil (defense objective)
 var sigil: Sigil = null
@@ -530,59 +530,30 @@ func _on_sigil_corrupted() -> void:
 # ============================================
 
 func _setup_hud_connections() -> void:
-	# Find HUD in scene
-	var animated_hud: AnimatedHUD = null
+	# Try to find/create FpsHud first (new design)
+	var fps_hud: FpsHud = null
 
-	if hud and hud is AnimatedHUD:
-		animated_hud = hud as AnimatedHUD
-	else:
-		# Look for HUD in UI layer
-		var root_hud := get_node_or_null("/root/AnimatedHUD")
-		if root_hud and root_hud is AnimatedHUD:
-			animated_hud = root_hud
-		else:
-			# Look for it as child
-			for child in get_children():
-				if child is AnimatedHUD:
-					animated_hud = child
-					break
+	# Look for existing FpsHud
+	for child in get_children():
+		if child is FpsHud:
+			fps_hud = child
+			break
 
-	if not animated_hud:
-		print("[GameWorld] No AnimatedHUD found - skipping HUD connections")
-		return
+	# If no FpsHud, create one dynamically
+	if not fps_hud:
+		fps_hud = FpsHud.new()
+		add_child(fps_hud)
+		print("[GameWorld] Created FpsHud dynamically")
 
-	# Connect GameState signals to HUD
-	GameState.wave_started.connect(func(wave_num: int):
-		animated_hud.wave_started.emit(wave_num)
-	)
-
-	GameState.zombie_killed.connect(func(zombie_id: int):
-		# Get zombie type for kill feed
-		var zombie_type := "Zombie"
-		animated_hud.kill_registered.emit(zombie_type, false)
-	)
-
+	# Connect hit confirmation for crosshair feedback
 	GameState.hit_confirmed.connect(func(peer_id: int, hit_data: Dictionary):
-		# Show hit marker for local player
 		var local_peer := multiplayer.get_unique_id()
 		if peer_id == local_peer:
-			var is_kill: bool = hit_data.get("target_type", "") == "zombie"
-			var is_headshot: bool = hit_data.get("is_headshot", false)
-			animated_hud.show_hit_marker(is_kill, is_headshot)
+			var is_kill: bool = hit_data.get("is_kill", false)
+			fps_hud.show_hit_marker(is_kill)
 	)
 
-	GameState.game_over.connect(func(reason: String, victory: bool):
-		# Could show game over UI here
-		print("[HUD] Game Over: %s (%s)" % [reason, "Victory" if victory else "Defeat"])
-	)
+	# FpsHud auto-updates from player state in _process(),
+	# so minimal signal connections needed
 
-	# Connect sigil signals to HUD
-	GameState.sigil_damaged.connect(func(damage: float, health: float, max_health: float):
-		animated_hud.update_sigil_health(health, max_health)
-	)
-
-	GameState.sigil_corrupted.connect(func(corruption_count: int):
-		animated_hud.on_sigil_corrupted()
-	)
-
-	print("[GameWorld] HUD connections established")
+	print("[GameWorld] FpsHud connections established")
