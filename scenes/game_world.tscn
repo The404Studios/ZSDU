@@ -1,33 +1,52 @@
-[gd_scene load_steps=13 format=3 uid="uid://dm4k2p7nxvwq6"]
+[gd_scene load_steps=25 format=3 uid="uid://dm4k2p7nxvwq6"]
 
 [ext_resource type="Script" path="res://scripts/world/game_world.gd" id="1_world"]
 [ext_resource type="Script" path="res://scripts/wave/wave_manager.gd" id="2_wave"]
 [ext_resource type="Script" path="res://scripts/ui/game_hud.gd" id="3_hud"]
 [ext_resource type="PackedScene" uid="uid://d2k8rv4ympjcb" path="res://scenes/props/shelf_prop.tscn" id="4_shelf"]
 [ext_resource type="PackedScene" uid="uid://bv7x2j6mkqp3d" path="res://scenes/props/crate_prop.tscn" id="5_crate"]
-[ext_resource type="Script" path="res://scripts/world/extraction_zone.gd" id="6_extraction"]
+[ext_resource type="PackedScene" uid="uid://cxk9wmj3p8yvn" path="res://scenes/props/table_prop.tscn" id="6_table"]
+[ext_resource type="Script" path="res://scripts/world/extraction_zone.gd" id="7_extraction"]
+[ext_resource type="Script" path="res://scripts/world/sigil.gd" id="8_sigil"]
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_ground"]
-size = Vector3(100, 1, 100)
+size = Vector3(30, 1, 80)
 
 [sub_resource type="BoxMesh" id="BoxMesh_ground"]
-size = Vector3(100, 1, 100)
+size = Vector3(30, 1, 80)
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_ground"]
-albedo_color = Color(0.4, 0.35, 0.3, 1)
+albedo_color = Color(0.35, 0.32, 0.28, 1)
+roughness = 0.9
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_wall"]
+size = Vector3(1, 5, 80)
+
+[sub_resource type="BoxMesh" id="BoxMesh_wall"]
+size = Vector3(1, 5, 80)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_wall"]
+albedo_color = Color(0.45, 0.42, 0.38, 1)
+roughness = 0.85
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_back_wall"]
+size = Vector3(30, 5, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_back_wall"]
+size = Vector3(30, 5, 1)
 
 [sub_resource type="Environment" id="Environment_main"]
 background_mode = 1
-background_color = Color(0.3, 0.35, 0.4, 1)
+background_color = Color(0.2, 0.22, 0.28, 1)
 ambient_light_source = 2
-ambient_light_color = Color(0.5, 0.5, 0.55, 1)
-ambient_light_energy = 0.5
+ambient_light_color = Color(0.7, 0.7, 0.75, 1)
+ambient_light_energy = 1.2
 tonemap_mode = 2
 ssao_enabled = true
 glow_enabled = true
 
 [sub_resource type="NavigationMesh" id="NavigationMesh_main"]
-vertices = PackedVector3Array(-50, 0, -50, 50, 0, -50, 50, 0, 50, -50, 0, 50)
+vertices = PackedVector3Array(-14, 0, -38, 14, 0, -38, 14, 0, 38, -14, 0, 38)
 polygons = [PackedInt32Array(0, 1, 2, 3)]
 agent_radius = 0.5
 agent_height = 2.0
@@ -35,6 +54,25 @@ agent_height = 2.0
 [sub_resource type="CylinderShape3D" id="CylinderShape3D_extraction"]
 height = 4.0
 radius = 3.0
+
+[sub_resource type="SphereShape3D" id="SphereShape3D_sigil"]
+radius = 2.0
+
+[sub_resource type="SphereMesh" id="SphereMesh_sigil"]
+radius = 0.8
+height = 1.6
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_sigil"]
+albedo_color = Color(0.2, 0.6, 0.9, 1)
+emission_enabled = true
+emission = Color(0.3, 0.7, 1.0, 1)
+emission_energy_multiplier = 2.0
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_doorframe_top"]
+size = Vector3(8, 1, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_doorframe_top"]
+size = Vector3(8, 1, 1)
 
 [node name="GameWorld" type="Node3D"]
 script = ExtResource("1_world")
@@ -47,31 +85,61 @@ script = ExtResource("1_world")
 
 [node name="SpawnPoints" type="Node" parent="."]
 
+[node name="SigilSpawn" type="Node3D" parent="SpawnPoints"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, -32)
+
 [node name="PlayerSpawn1" type="Node3D" parent="SpawnPoints"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, 1, -30)
 
 [node name="PlayerSpawn2" type="Node3D" parent="SpawnPoints"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3, 1, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4, 1, -30)
 
 [node name="PlayerSpawn3" type="Node3D" parent="SpawnPoints"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3, 1, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, 1, -34)
 
 [node name="PlayerSpawn4" type="Node3D" parent="SpawnPoints"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 3)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4, 1, -34)
+
+[node name="GroupSpawn_Alpha_0" type="Node3D" parent="SpawnPoints"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6, 1, -32)
+
+[node name="GroupSpawn_Alpha_1" type="Node3D" parent="SpawnPoints"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, 1, -32)
+
+[node name="GroupSpawn_Alpha_2" type="Node3D" parent="SpawnPoints"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6, 1, -34)
+
+[node name="GroupSpawn_Alpha_3" type="Node3D" parent="SpawnPoints"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, 1, -34)
+
+[node name="SoloSpawn_0" type="Node3D" parent="SpawnPoints"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, -32)
+
+[node name="SoloSpawn_1" type="Node3D" parent="SpawnPoints"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2, 1, -32)
+
+[node name="SoloSpawn_2" type="Node3D" parent="SpawnPoints"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2, 1, -32)
+
+[node name="SoloSpawn_3" type="Node3D" parent="SpawnPoints"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, -34)
 
 [node name="ZombieSpawns" type="Node" parent="."]
 
 [node name="Spawn1" type="Node3D" parent="ZombieSpawns" groups=["zombie_spawns"]]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 30, 1, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -8, 1, 38)
 
 [node name="Spawn2" type="Node3D" parent="ZombieSpawns" groups=["zombie_spawns"]]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -30, 1, 0)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 38)
 
 [node name="Spawn3" type="Node3D" parent="ZombieSpawns" groups=["zombie_spawns"]]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 30)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 8, 1, 38)
 
 [node name="Spawn4" type="Node3D" parent="ZombieSpawns" groups=["zombie_spawns"]]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, -30)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, 1, 40)
+
+[node name="Spawn5" type="Node3D" parent="ZombieSpawns" groups=["zombie_spawns"]]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4, 1, 40)
 
 [node name="WaveManager" type="Node" parent="."]
 script = ExtResource("2_wave")
@@ -91,9 +159,87 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.5, 0)
 mesh = SubResource("BoxMesh_ground")
 surface_material_override/0 = SubResource("StandardMaterial3D_ground")
 
+[node name="WallLeft" type="StaticBody3D" parent="Environment"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -15, 2.5, 0)
+collision_layer = 1
+collision_mask = 0
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Environment/WallLeft"]
+shape = SubResource("BoxShape3D_wall")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Environment/WallLeft"]
+mesh = SubResource("BoxMesh_wall")
+surface_material_override/0 = SubResource("StandardMaterial3D_wall")
+
+[node name="WallRight" type="StaticBody3D" parent="Environment"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 15, 2.5, 0)
+collision_layer = 1
+collision_mask = 0
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Environment/WallRight"]
+shape = SubResource("BoxShape3D_wall")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Environment/WallRight"]
+mesh = SubResource("BoxMesh_wall")
+surface_material_override/0 = SubResource("StandardMaterial3D_wall")
+
+[node name="BackWall" type="StaticBody3D" parent="Environment"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.5, -40)
+collision_layer = 1
+collision_mask = 0
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Environment/BackWall"]
+shape = SubResource("BoxShape3D_back_wall")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Environment/BackWall"]
+mesh = SubResource("BoxMesh_back_wall")
+surface_material_override/0 = SubResource("StandardMaterial3D_wall")
+
+[node name="DoorframeTop" type="StaticBody3D" parent="Environment"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 4.5, -20)
+collision_layer = 1
+collision_mask = 0
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Environment/DoorframeTop"]
+shape = SubResource("BoxShape3D_doorframe_top")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Environment/DoorframeTop"]
+mesh = SubResource("BoxMesh_doorframe_top")
+surface_material_override/0 = SubResource("StandardMaterial3D_wall")
+
 [node name="DirectionalLight3D" type="DirectionalLight3D" parent="Environment"]
 transform = Transform3D(0.866025, -0.353553, 0.353553, 0, 0.707107, 0.707107, -0.5, -0.612372, 0.612372, 0, 20, 0)
+light_energy = 1.5
 shadow_enabled = true
+directional_shadow_mode = 1
+
+[node name="PointLight_PlayerArea" type="OmniLight3D" parent="Environment"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 4, -30)
+light_color = Color(0.9, 0.85, 0.7, 1)
+light_energy = 2.0
+omni_range = 15.0
+omni_attenuation = 0.8
+
+[node name="PointLight_Hallway1" type="OmniLight3D" parent="Environment"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 4, -10)
+light_color = Color(0.8, 0.75, 0.6, 1)
+light_energy = 1.5
+omni_range = 12.0
+omni_attenuation = 0.9
+
+[node name="PointLight_Hallway2" type="OmniLight3D" parent="Environment"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 4, 10)
+light_color = Color(0.7, 0.65, 0.55, 1)
+light_energy = 1.2
+omni_range = 12.0
+omni_attenuation = 0.9
+
+[node name="PointLight_ZombieArea" type="OmniLight3D" parent="Environment"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 4, 30)
+light_color = Color(0.6, 0.5, 0.4, 1)
+light_energy = 1.0
+omni_range = 15.0
+omni_attenuation = 1.0
 
 [node name="WorldEnvironment" type="WorldEnvironment" parent="Environment"]
 environment = SubResource("Environment_main")
@@ -101,33 +247,168 @@ environment = SubResource("Environment_main")
 [node name="NavigationRegion3D" type="NavigationRegion3D" parent="."]
 navigation_mesh = SubResource("NavigationMesh_main")
 
-[node name="ExtractionZone" type="Area3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -20, 0, -20)
+[node name="Sigil" type="Node3D" parent="." groups=["sigil"]]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, -32)
+script = ExtResource("8_sigil")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Sigil"]
+mesh = SubResource("SphereMesh_sigil")
+surface_material_override/0 = SubResource("StandardMaterial3D_sigil")
+
+[node name="ExtractionZones" type="Node" parent="."]
+
+[node name="ExtractionZone_Wave5" type="Area3D" parent="ExtractionZones"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -10, 0, -35)
 collision_layer = 0
 collision_mask = 2
-script = ExtResource("6_extraction")
-zone_name = "Primary Extraction"
+script = ExtResource("7_extraction")
+zone_name = "Early Extraction (Wave 5)"
+enabled = false
+unlock_wave = 5
+duration = 5
 
-[node name="CollisionShape3D" type="CollisionShape3D" parent="ExtractionZone"]
+[node name="CollisionShape3D" type="CollisionShape3D" parent="ExtractionZones/ExtractionZone_Wave5"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0)
+shape = SubResource("CylinderShape3D_extraction")
+
+[node name="ExtractionZone_Wave10" type="Area3D" parent="ExtractionZones"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 10, 0, -35)
+collision_layer = 0
+collision_mask = 2
+script = ExtResource("7_extraction")
+zone_name = "Secondary Extraction (Wave 10)"
+enabled = false
+unlock_wave = 10
+duration = 5
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="ExtractionZones/ExtractionZone_Wave10"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0)
+shape = SubResource("CylinderShape3D_extraction")
+
+[node name="ExtractionZone_Wave15" type="Area3D" parent="ExtractionZones"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -12, 0, -25)
+collision_layer = 0
+collision_mask = 2
+script = ExtResource("7_extraction")
+zone_name = "Side Extraction (Wave 15)"
+enabled = false
+unlock_wave = 15
+duration = 5
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="ExtractionZones/ExtractionZone_Wave15"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0)
+shape = SubResource("CylinderShape3D_extraction")
+
+[node name="ExtractionZone_Wave20" type="Area3D" parent="ExtractionZones"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 12, 0, -25)
+collision_layer = 0
+collision_mask = 2
+script = ExtResource("7_extraction")
+zone_name = "Alternate Extraction (Wave 20)"
+enabled = false
+unlock_wave = 20
+duration = 5
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="ExtractionZones/ExtractionZone_Wave20"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0)
+shape = SubResource("CylinderShape3D_extraction")
+
+[node name="ExtractionZone_Final" type="Area3D" parent="ExtractionZones"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -36)
+collision_layer = 0
+collision_mask = 2
+script = ExtResource("7_extraction")
+zone_name = "Final Extraction (Wave 30)"
+enabled = false
+unlock_wave = 30
+is_final_extraction = true
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="ExtractionZones/ExtractionZone_Final"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0)
 shape = SubResource("CylinderShape3D_extraction")
 
 [node name="BarricadeProps" type="Node3D" parent="."]
 
-[node name="Shelf1" parent="BarricadeProps" instance=ExtResource("4_shelf")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5, 0, 5)
+[node name="Shelf_Hallway1" parent="BarricadeProps" instance=ExtResource("4_shelf")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6, 0, -15)
 
-[node name="Shelf2" parent="BarricadeProps" instance=ExtResource("4_shelf")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5, 0, 5)
+[node name="Shelf_Hallway2" parent="BarricadeProps" instance=ExtResource("4_shelf")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 6, 0, -15)
 
-[node name="Crate1" parent="BarricadeProps" instance=ExtResource("5_crate")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3, 0, 3)
+[node name="Shelf_Hallway3" parent="BarricadeProps" instance=ExtResource("4_shelf")]
+transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, -10, 0, -5)
 
-[node name="Crate2" parent="BarricadeProps" instance=ExtResource("5_crate")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3, 0, 3)
+[node name="Shelf_Hallway4" parent="BarricadeProps" instance=ExtResource("4_shelf")]
+transform = Transform3D(0, 0, -1, 0, 1, 0, 1, 0, 0, 10, 0, -5)
 
-[node name="Crate3" parent="BarricadeProps" instance=ExtResource("5_crate")]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 6)
+[node name="Shelf_Hallway5" parent="BarricadeProps" instance=ExtResource("4_shelf")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, 0, 5)
+
+[node name="Shelf_Hallway6" parent="BarricadeProps" instance=ExtResource("4_shelf")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4, 0, 5)
+
+[node name="Table_Doorway1" parent="BarricadeProps" instance=ExtResource("6_table")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -2, 0, -18)
+
+[node name="Table_Doorway2" parent="BarricadeProps" instance=ExtResource("6_table")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2, 0, -18)
+
+[node name="Table_Hallway1" parent="BarricadeProps" instance=ExtResource("6_table")]
+transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, -8, 0, 0)
+
+[node name="Table_Hallway2" parent="BarricadeProps" instance=ExtResource("6_table")]
+transform = Transform3D(0, 0, -1, 0, 1, 0, 1, 0, 0, 8, 0, 0)
+
+[node name="Table_Hallway3" parent="BarricadeProps" instance=ExtResource("6_table")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 12)
+
+[node name="Crate_Stack1_1" parent="BarricadeProps" instance=ExtResource("5_crate")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -8, 0, -12)
+
+[node name="Crate_Stack1_2" parent="BarricadeProps" instance=ExtResource("5_crate")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -8, 0.8, -12)
+
+[node name="Crate_Stack2_1" parent="BarricadeProps" instance=ExtResource("5_crate")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 8, 0, -12)
+
+[node name="Crate_Stack2_2" parent="BarricadeProps" instance=ExtResource("5_crate")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 8, 0.8, -12)
+
+[node name="Crate_Hallway1" parent="BarricadeProps" instance=ExtResource("5_crate")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -5, 0, 0)
+
+[node name="Crate_Hallway2" parent="BarricadeProps" instance=ExtResource("5_crate")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5, 0, 0)
+
+[node name="Crate_Hallway3" parent="BarricadeProps" instance=ExtResource("5_crate")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -3, 0, 8)
+
+[node name="Crate_Hallway4" parent="BarricadeProps" instance=ExtResource("5_crate")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3, 0, 8)
+
+[node name="Crate_Hallway5" parent="BarricadeProps" instance=ExtResource("5_crate")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 15)
+
+[node name="Crate_Hallway6" parent="BarricadeProps" instance=ExtResource("5_crate")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -6, 0, 18)
+
+[node name="Crate_Hallway7" parent="BarricadeProps" instance=ExtResource("5_crate")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 6, 0, 18)
+
+[node name="Shelf_Forward1" parent="BarricadeProps" instance=ExtResource("4_shelf")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -8, 0, 22)
+
+[node name="Shelf_Forward2" parent="BarricadeProps" instance=ExtResource("4_shelf")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 8, 0, 22)
+
+[node name="Table_Forward1" parent="BarricadeProps" instance=ExtResource("6_table")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 25)
+
+[node name="Crate_Forward1" parent="BarricadeProps" instance=ExtResource("5_crate")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, 0, 28)
+
+[node name="Crate_Forward2" parent="BarricadeProps" instance=ExtResource("5_crate")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4, 0, 28)
 
 [node name="HUD" type="CanvasLayer" parent="."]
 
@@ -155,6 +436,10 @@ text = "Wave: 0"
 [node name="ZombiesLabel" type="Label" parent="HUD/HUDControl/TopBar"]
 layout_mode = 2
 text = "Zombies: 0"
+
+[node name="SigilLabel" type="Label" parent="HUD/HUDControl/TopBar"]
+layout_mode = 2
+text = "Sigil: 100%"
 
 [node name="BottomBar" type="HBoxContainer" parent="HUD/HUDControl"]
 layout_mode = 1
