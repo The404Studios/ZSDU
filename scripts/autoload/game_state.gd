@@ -114,31 +114,40 @@ func _server_tick() -> void:
 ## Build state snapshot for network sync
 func _build_snapshot() -> Dictionary:
 	var player_states := {}
-	for peer_id in players:
-		var player: Node3D = players[peer_id]
+	var peer_ids := players.keys()
+	for peer_id in peer_ids:
+		var player: Node3D = players.get(peer_id)
 		if is_instance_valid(player) and player.has_method("get_network_state"):
 			player_states[peer_id] = player.get_network_state()
 
 	var zombie_states := {}
-	for zombie_id in zombies:
-		var zombie: Node3D = zombies[zombie_id]
+	var zombie_ids := zombies.keys()
+	for zombie_id in zombie_ids:
+		var zombie: Node3D = zombies.get(zombie_id)
 		if is_instance_valid(zombie) and zombie.has_method("get_network_state"):
 			zombie_states[zombie_id] = zombie.get_network_state()
 
 	var nail_states := {}
-	for nail_id in nails:
-		var nail_data: Dictionary = nails[nail_id]
+	var nail_ids := nails.keys()
+	for nail_id in nail_ids:
+		var nail_data: Dictionary = nails.get(nail_id, {})
+		if nail_data.is_empty():
+			continue
 		nail_states[nail_id] = {
-			"hp": nail_data.hp,
-			"active": nail_data.active
+			"hp": nail_data.get("hp", 0.0),
+			"active": nail_data.get("active", false)
 		}
 
 	# Prop states (includes held state for interpolation)
 	var prop_states := {}
-	for prop_id in props:
-		var prop: RigidBody3D = props[prop_id]
-		if is_instance_valid(prop) and prop.has_method("get_network_state"):
-			prop_states[prop_id] = prop.get_network_state()
+	var prop_ids := props.keys()
+	for prop_id in prop_ids:
+		var prop: Node3D = props.get(prop_id)
+		if not is_instance_valid(prop):
+			continue
+		var rigid_prop: RigidBody3D = prop as RigidBody3D
+		if rigid_prop and rigid_prop.has_method("get_network_state"):
+			prop_states[prop_id] = rigid_prop.get_network_state()
 
 	return {
 		"tick": Engine.get_physics_frames(),

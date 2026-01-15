@@ -74,8 +74,9 @@ func _update_all_distances() -> void:
 	centroid /= player_positions.size()
 
 	# Update zombie distances
-	for zombie_id in GameState.zombies:
-		var zombie: Node3D = GameState.zombies[zombie_id]
+	var zombie_ids := GameState.zombies.keys()
+	for zombie_id in zombie_ids:
+		var zombie: Node3D = GameState.zombies.get(zombie_id)
 		if not is_instance_valid(zombie):
 			continue
 
@@ -87,8 +88,9 @@ func _update_all_distances() -> void:
 		_update_entity_throttle(zombie, min_dist, true)
 
 	# Update prop distances
-	for prop_id in GameState.props:
-		var prop: Node3D = GameState.props[prop_id]
+	var prop_ids := GameState.props.keys()
+	for prop_id in prop_ids:
+		var prop: Node3D = GameState.props.get(prop_id)
 		if not is_instance_valid(prop):
 			continue
 
@@ -130,9 +132,13 @@ func _update_entity_throttle(entity: Node, distance: float, is_zombie: bool) -> 
 
 ## Process zombie throttling
 func _process_zombie_throttling() -> void:
-	for zombie_id in GameState.zombies:
-		var zombie: ZombieController = GameState.zombies[zombie_id] as ZombieController
-		if not is_instance_valid(zombie):
+	var zombie_ids := GameState.zombies.keys()
+	for zombie_id in zombie_ids:
+		var zombie_node: Node3D = GameState.zombies.get(zombie_id)
+		if not is_instance_valid(zombie_node):
+			continue
+		var zombie: ZombieController = zombie_node as ZombieController
+		if not zombie:
 			continue
 
 		var path := zombie.get_path()
@@ -157,9 +163,13 @@ func _process_zombie_throttling() -> void:
 
 ## Process prop throttling (sleep management)
 func _process_prop_throttling() -> void:
-	for prop_id in GameState.props:
-		var prop: RigidBody3D = GameState.props[prop_id] as RigidBody3D
-		if not is_instance_valid(prop):
+	var prop_ids := GameState.props.keys()
+	for prop_id in prop_ids:
+		var prop_node: Node3D = GameState.props.get(prop_id)
+		if not is_instance_valid(prop_node):
+			continue
+		var prop: RigidBody3D = prop_node as RigidBody3D
+		if not prop:
 			continue
 
 		var path := prop.get_path()
@@ -224,9 +234,13 @@ func unregister_entity(entity: Node) -> void:
 
 ## Force wake a prop (when zombie attacks nearby)
 func wake_nearby_props(position: Vector3, radius: float = 5.0) -> void:
-	for prop_id in GameState.props:
-		var prop: RigidBody3D = GameState.props[prop_id] as RigidBody3D
-		if not is_instance_valid(prop):
+	var prop_ids := GameState.props.keys()
+	for prop_id in prop_ids:
+		var prop_node: Node3D = GameState.props.get(prop_id)
+		if not is_instance_valid(prop_node):
+			continue
+		var prop: RigidBody3D = prop_node as RigidBody3D
+		if not prop:
 			continue
 
 		if prop.global_position.distance_to(position) < radius:

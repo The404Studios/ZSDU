@@ -2,7 +2,7 @@ extends Area3D
 class_name ExtractionZone
 ## ExtractionZone - Player extraction point
 ##
-## Players can extract here once extraction is unlocked (wave 5+).
+## Players can extract here once extraction is unlocked at the specified wave.
 ## Stand in zone for extraction_time seconds to extract.
 ## Extraction is interrupted if damaged or zone is exited.
 
@@ -10,18 +10,24 @@ signal extraction_started(peer_id: int)
 signal extraction_progress(peer_id: int, progress: float)
 signal extraction_complete(peer_id: int)
 signal extraction_cancelled(peer_id: int)
+signal zone_unlocked(zone_name: String, wave: int)
 
 @export var extraction_time := 5.0  # Seconds to extract
 @export var zone_name := "Extraction Point"
 @export var enabled := false  # Starts disabled, enabled when extraction unlocks
+@export var unlock_wave := 5  # Wave at which this extraction zone becomes available
+@export var duration := -1  # Duration in waves (-1 = permanent, 5 = stays open for 5 waves)
+@export var is_final_extraction := false  # If true, stays open permanently after wave 30
 
 # Visual
 @export var active_color := Color(0.2, 0.8, 0.2, 0.5)  # Green when active
 @export var inactive_color := Color(0.5, 0.5, 0.5, 0.3)  # Gray when inactive
+@export var pending_color := Color(0.8, 0.8, 0.2, 0.3)  # Yellow when waiting for unlock
 
 # State
 var players_in_zone: Dictionary = {}  # peer_id -> extraction_timer
 var extraction_mesh: MeshInstance3D = null
+var unlocked_at_wave := -1  # Track when this zone was unlocked
 
 
 func _ready() -> void:
@@ -32,9 +38,10 @@ func _ready() -> void:
 	# Create visual indicator
 	_create_visual()
 
-	# Connect to GameState extraction signal
+	# Connect to GameState wave signals for periodic extraction unlocking
 	if GameState:
-		GameState.extraction_available.connect(_on_extraction_unlocked)
+		GameState.wave_started.connect(_on_wave_started)
+		GameState.wave_ended.connect(_on_wave_ended)
 
 	# Add to group for easy finding
 	add_to_group("extraction_zones")
@@ -110,11 +117,74 @@ func _update_visual() -> void:
 		material.emission = active_color if enabled else inactive_color
 
 
-## Called when extraction is unlocked globally
-func _on_extraction_unlocked() -> void:
+## Called when a wave starts - check if this zone should unlock
+func _on_wave_started(wave: int) -> void:
+	# Check if this zone should unlock at this wave
+	if not enabled and wave >= unlock_wave:
+		_unlock_zone(wave)
+
+	# Check if this zone should close (duration expired)
+	if enabled and duration > 0 and unlocked_at_wave > 0:
+		var waves_since_unlock := wave - unlocked_at_wave
+		if waves_since_unlock >= duration:
+			_close_zone("Duration expired after %d waves" % duration)
+
+
+## Called when a wave ends
+func _on_wave_ended(wave: int) -> void:
+	# Final extraction logic - after wave 30, permanent extraction opens
+	if is_final_extraction and wave >= 30 and not enabled:
+		_unlock_zone(wave)
+		print("[ExtractionZone] Final extraction %s is permanently open!" % zone_name)
+
+
+## Unlock this extraction zone
+func _unlock_zone(wave: int) -> void:
 	enabled = true
+	unlocked_at_wave = wave
 	_update_visual()
-	print("[ExtractionZone] %s is now active!" % zone_name)
+
+	print("[ExtractionZone] %s unlocked at wave %d!" % [zone_name, wave])
+	zone_unlocked.emit(zone_name, wave)
+
+	# Notify server to broadcast
+	if NetworkManager.is_authority():
+		NetworkManager.broadcast_event.rpc("extraction_zone_unlocked", {
+			"zone_name": zone_name,
+			"wave": wave,
+			"position": global_position
+		})
+
+	# Also emit the global extraction available signal
+	if GameState and not GameState.extraction_active:
+		GameState.extraction_active = true
+		GameState.extraction_available.emit()
+
+
+## Close this extraction zone
+func _close_zone(reason: String) -> void:
+	enabled = false
+	_update_visual()
+
+	print("[ExtractionZone] %s closed: %s" % [zone_name, reason])
+
+	# Cancel any active extractions
+	for peer_id in players_in_zone.keys():
+		_cancel_extraction(peer_id, "Zone closed")
+
+	# Notify clients
+	if NetworkManager.is_authority():
+		NetworkManager.broadcast_event.rpc("extraction_zone_closed", {
+			"zone_name": zone_name,
+			"reason": reason
+		})
+
+
+## Called when extraction is unlocked globally (legacy support)
+func _on_extraction_unlocked() -> void:
+	# Only respond if this zone's unlock_wave has been reached
+	if GameState.current_wave >= unlock_wave and not enabled:
+		_unlock_zone(GameState.current_wave)
 
 
 ## Called when player enters zone
@@ -208,3 +278,36 @@ func disable_zone() -> void:
 	# Cancel all active extractions
 	for peer_id in players_in_zone.keys():
 		_cancel_extraction(peer_id, "Zone disabled")
+
+
+## Get network state for snapshot (server-side)
+func get_network_state() -> Dictionary:
+	return {
+		"zone_name": zone_name,
+		"enabled": enabled,
+		"unlock_wave": unlock_wave,
+		"unlocked_at_wave": unlocked_at_wave,
+		"position": global_position,
+		"players_extracting": players_in_zone.keys()
+	}
+
+
+## Apply network state (client-side)
+func apply_network_state(state: Dictionary) -> void:
+	var was_enabled := enabled
+	enabled = state.get("enabled", enabled)
+	unlocked_at_wave = state.get("unlocked_at_wave", unlocked_at_wave)
+
+	# Update visual if state changed
+	if was_enabled != enabled:
+		_update_visual()
+
+
+## Get the unlock status for UI display
+func get_unlock_status() -> String:
+	if enabled:
+		return "OPEN"
+	elif GameState and GameState.current_wave >= unlock_wave:
+		return "AVAILABLE"
+	else:
+		return "Unlocks at Wave %d" % unlock_wave
