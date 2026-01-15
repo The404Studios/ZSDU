@@ -624,6 +624,7 @@ func _create_menu_button(text: String, color: Color) -> Button:
 	var btn := Button.new()
 	btn.text = text
 	btn.custom_minimum_size = Vector2(280, 50)
+	btn.pivot_offset = Vector2(140, 25)  # Center pivot for scale animation
 
 	# Style the button
 	var style := StyleBoxFlat.new()
@@ -646,7 +647,37 @@ func _create_menu_button(text: String, color: Color) -> Button:
 
 	btn.add_theme_font_size_override("font_size", 18)
 
+	# Add hover animation
+	btn.mouse_entered.connect(_on_button_hover.bind(btn))
+	btn.mouse_exited.connect(_on_button_unhover.bind(btn))
+	btn.button_down.connect(_on_button_down.bind(btn))
+	btn.button_up.connect(_on_button_up.bind(btn))
+
 	return btn
+
+
+# ============================================
+# BUTTON ANIMATIONS
+# ============================================
+
+var _button_anim := UIAnimations.new()
+
+func _on_button_hover(btn: Button) -> void:
+	_button_anim.button_hover(btn, 1.03)
+
+
+func _on_button_unhover(btn: Button) -> void:
+	_button_anim.button_unhover(btn)
+
+
+func _on_button_down(btn: Button) -> void:
+	var tween := btn.create_tween()
+	tween.tween_property(btn, "scale", Vector2(0.97, 0.97), 0.05)
+
+
+func _on_button_up(btn: Button) -> void:
+	var tween := btn.create_tween()
+	tween.tween_property(btn, "scale", Vector2(1.03, 1.03), 0.08).set_trans(Tween.TRANS_BACK)
 
 
 # ============================================
@@ -654,22 +685,14 @@ func _create_menu_button(text: String, color: Color) -> Button:
 # ============================================
 
 func _show_login() -> void:
-	main_panel.visible = false
-	play_panel.visible = false
-	direct_connect_panel.visible = false
-	login_panel.visible = true
-	if settings_panel:
-		settings_panel.visible = false
+	_hide_all_panels()
+	_animate_panel_in(login_panel)
 	player_info_label.visible = false
 
 
 func _show_main_menu() -> void:
-	main_panel.visible = true
-	play_panel.visible = false
-	direct_connect_panel.visible = false
-	login_panel.visible = false
-	if settings_panel:
-		settings_panel.visible = false
+	_hide_all_panels()
+	_animate_panel_in(main_panel)
 	player_info_label.visible = true
 
 	if FriendSystem:
@@ -678,32 +701,48 @@ func _show_main_menu() -> void:
 
 
 func _show_play_menu() -> void:
-	main_panel.visible = false
-	play_panel.visible = true
-	direct_connect_panel.visible = false
-	login_panel.visible = false
-	if settings_panel:
-		settings_panel.visible = false
+	_hide_all_panels()
+	_animate_panel_in(play_panel)
 	status_label.text = ""
 
 
 func _show_direct_connect() -> void:
-	main_panel.visible = false
-	play_panel.visible = false
-	direct_connect_panel.visible = true
-	login_panel.visible = false
-	if settings_panel:
-		settings_panel.visible = false
+	_hide_all_panels()
+	_animate_panel_in(direct_connect_panel)
 	status_label.text = ""
 
 
 func _show_settings() -> void:
-	main_panel.visible = false
-	play_panel.visible = false
-	direct_connect_panel.visible = false
-	login_panel.visible = false
-	settings_panel.visible = true
+	_hide_all_panels()
+	_animate_panel_in(settings_panel)
 	status_label.text = ""
+
+
+func _hide_all_panels() -> void:
+	if main_panel:
+		main_panel.visible = false
+	if play_panel:
+		play_panel.visible = false
+	if direct_connect_panel:
+		direct_connect_panel.visible = false
+	if login_panel:
+		login_panel.visible = false
+	if settings_panel:
+		settings_panel.visible = false
+
+
+func _animate_panel_in(panel: Control) -> void:
+	if not panel:
+		return
+
+	panel.modulate.a = 0.0
+	panel.scale = Vector2(0.95, 0.95)
+	panel.visible = true
+
+	var tween := panel.create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(panel, "modulate:a", 1.0, 0.15)
+	tween.tween_property(panel, "scale", Vector2.ONE, 0.2).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
 
 # ============================================
