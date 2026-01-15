@@ -387,16 +387,6 @@ func _create_toggle_setting(label_text: String, setting_name: String, default_va
 
 	return container
 
-	# Spacer
-	var spacer := Control.new()
-	spacer.custom_minimum_size = Vector2(0, 10)
-	inner_vbox.add_child(spacer)
-
-	# Quit button
-	quit_button = _create_menu_button("QUIT", Color(0.7, 0.2, 0.2))
-	quit_button.pressed.connect(_on_quit_pressed)
-	inner_vbox.add_child(quit_button)
-
 
 func _create_play_menu() -> void:
 	play_panel = PanelContainer.new()

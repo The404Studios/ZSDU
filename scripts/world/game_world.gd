@@ -14,7 +14,7 @@ extends Node3D
 @onready var spawn_points: Node = $SpawnPoints
 @onready var wave_manager: WaveManager = $WaveManager if has_node("WaveManager") else null
 @onready var hud: Node = $HUD if has_node("HUD") else null
-@onready var hud = $HUD if has_node("HUD") else null
+@onready var nav_region: NavigationRegion3D = $NavigationRegion3D if has_node("NavigationRegion3D") else null
 
 # Sigil (defense objective)
 var sigil: Sigil = null
@@ -37,6 +37,9 @@ var active_groups: Dictionary = {}  # group_name -> [peer_ids]
 func _ready() -> void:
 	# Initialize GameState with world reference
 	GameState.initialize_world(self)
+
+	# Setup and bake navigation mesh for zombie pathfinding
+	_setup_navigation()
 
 	# Collect spawn points
 	_collect_spawn_points()
@@ -71,6 +74,53 @@ func _ready() -> void:
 	if NetworkManager.is_authority():
 		await get_tree().create_timer(3.0).timeout
 		_start_game()
+
+
+func _setup_navigation() -> void:
+	# Find or create NavigationRegion3D
+	if not nav_region:
+		nav_region = get_node_or_null("NavigationRegion3D")
+
+	if not nav_region:
+		# Create navigation region if it doesn't exist
+		nav_region = NavigationRegion3D.new()
+		nav_region.name = "NavigationRegion3D"
+		add_child(nav_region)
+		print("[GameWorld] Created NavigationRegion3D")
+
+	# Configure navigation mesh for baking
+	var navmesh := NavigationMesh.new()
+	navmesh.agent_radius = 0.5
+	navmesh.agent_height = 2.0
+	navmesh.agent_max_climb = 0.5
+	navmesh.agent_max_slope = 45.0
+	navmesh.cell_size = 0.25
+	navmesh.cell_height = 0.25
+
+	# Set geometry parsing to parse static colliders
+	navmesh.geometry_parsed_geometry_type = NavigationMesh.PARSED_GEOMETRY_STATIC_COLLIDERS
+	navmesh.geometry_source_geometry_mode = NavigationMesh.SOURCE_GEOMETRY_ROOT_NODE_CHILDREN
+
+	# Define the baking bounds (should cover the entire playable area)
+	# Expand from -15 to 15 on X, 0 to 5 on Y, -40 to 42 on Z
+	navmesh.filter_baking_aabb = AABB(Vector3(-16, -1, -42), Vector3(32, 8, 86))
+
+	nav_region.navigation_mesh = navmesh
+
+	# Bake the navigation mesh
+	print("[GameWorld] Baking navigation mesh...")
+	nav_region.bake_navigation_mesh()
+
+	# Connect to bake finished signal if available
+	if nav_region.has_signal("bake_finished"):
+		if not nav_region.bake_finished.is_connected(_on_nav_bake_finished):
+			nav_region.bake_finished.connect(_on_nav_bake_finished)
+
+	print("[GameWorld] Navigation mesh setup complete")
+
+
+func _on_nav_bake_finished() -> void:
+	print("[GameWorld] Navigation mesh baking finished")
 
 
 func _setup_sigil() -> void:

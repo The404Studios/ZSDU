@@ -231,29 +231,47 @@ func _recalculate_derived_stats() -> void:
 		"melee_damage_mult": 1.0 + (str_val - BASE_ATTRIBUTE) * 0.02,  # +2% per point
 		"carry_weight": 50 + str_val * 2,  # Base 50 + 2 per STR
 		"barricade_hp_mult": 1.0 + (str_val - BASE_ATTRIBUTE) * 0.015,  # +1.5% per point
+		"knockback_resist": minf((str_val - BASE_ATTRIBUTE) * 0.02, 0.5),  # Max 50% resist
+		"stagger_power": 1.0 + (str_val - BASE_ATTRIBUTE) * 0.015,  # Knockback dealt
 
 		# Agility-based
 		"move_speed_mult": 1.0 + (agi_val - BASE_ATTRIBUTE) * 0.01,  # +1% per point
 		"reload_speed_mult": 1.0 + (agi_val - BASE_ATTRIBUTE) * 0.015,  # +1.5% per point
 		"ads_speed_mult": 1.0 + (agi_val - BASE_ATTRIBUTE) * 0.02,  # +2% per point
 		"sprint_speed_mult": 1.0 + (agi_val - BASE_ATTRIBUTE) * 0.015,
+		"dodge_chance": minf((agi_val - BASE_ATTRIBUTE) * 0.005, 0.15),  # Max 15% dodge
+		"weapon_swap_speed": 1.0 + (agi_val - BASE_ATTRIBUTE) * 0.02,
+		"fall_damage_reduction": minf((agi_val - BASE_ATTRIBUTE) * 0.03, 0.6),  # Max 60%
 
 		# Endurance-based
 		"max_health": 100 + (end_val - BASE_ATTRIBUTE) * 5,  # +5 HP per point
 		"max_stamina": 100 + (end_val - BASE_ATTRIBUTE) * 3,  # +3 stamina per point
 		"stamina_regen_mult": 1.0 + (end_val - BASE_ATTRIBUTE) * 0.02,  # +2% per point
 		"health_regen": (end_val - BASE_ATTRIBUTE) * 0.1,  # +0.1 HP/sec per point
+		"bleed_resist": minf((end_val - BASE_ATTRIBUTE) * 0.02, 0.5),  # Max 50% resist
+		"poison_resist": minf((end_val - BASE_ATTRIBUTE) * 0.015, 0.4),  # Max 40% resist
+		"infection_resist": minf((end_val - BASE_ATTRIBUTE) * 0.01, 0.3),  # Max 30% resist
 
 		# Intellect-based
 		"xp_multiplier": 1.0 + (int_val - BASE_ATTRIBUTE) * 0.02,  # +2% XP per point
-		"skill_cooldown_mult": 1.0 - (int_val - BASE_ATTRIBUTE) * 0.01,  # -1% cooldown per point
+		"skill_cooldown_mult": 1.0 - minf((int_val - BASE_ATTRIBUTE) * 0.01, 0.3),  # Max 30% CDR
 		"interaction_speed_mult": 1.0 + (int_val - BASE_ATTRIBUTE) * 0.015,  # +1.5% per point
+		"crafting_speed_mult": 1.0 + (int_val - BASE_ATTRIBUTE) * 0.02,
+		"item_efficiency": 1.0 + (int_val - BASE_ATTRIBUTE) * 0.01,  # Consumable effectiveness
+		"weak_spot_bonus": 1.0 + (int_val - BASE_ATTRIBUTE) * 0.02,  # Headshot damage bonus
 
 		# Luck-based
 		"crit_chance": 0.05 + lck_val * 0.005,  # 5% base + 0.5% per point
 		"crit_damage_mult": 1.5 + (lck_val - BASE_ATTRIBUTE) * 0.02,  # 150% base + 2% per point
 		"loot_quality_mult": 1.0 + (lck_val - BASE_ATTRIBUTE) * 0.02,  # +2% per point
 		"proc_chance_mult": 1.0 + (lck_val - BASE_ATTRIBUTE) * 0.01,  # +1% per point
+		"double_loot_chance": minf((lck_val - BASE_ATTRIBUTE) * 0.005, 0.15),  # Max 15%
+		"rare_spawn_chance": 1.0 + (lck_val - BASE_ATTRIBUTE) * 0.015,  # Better enemy drops
+
+		# Combined stats (multiple attribute influence)
+		"damage_reduction": minf((str_val + end_val - BASE_ATTRIBUTE * 2) * 0.005, 0.25),  # Max 25%
+		"accuracy_bonus": (agi_val + int_val - BASE_ATTRIBUTE * 2) * 0.005,
+		"resource_efficiency": 1.0 + (int_val + lck_val - BASE_ATTRIBUTE * 2) * 0.005,
 	}
 
 	derived_stats_updated.emit(derived_stats)

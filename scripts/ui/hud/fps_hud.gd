@@ -114,6 +114,9 @@ func _process(delta: float) -> void:
 	_update_buffs()
 	_update_xp_popups(delta)
 	_update_extraction(delta)
+	_update_damage_numbers(delta)
+	_update_combo(delta)
+	_update_minimap_from_player()
 
 
 # ============================================
@@ -137,6 +140,9 @@ func _build_ui() -> void:
 	_build_death_screen()
 	_build_game_over_screen()
 	_build_xp_popup_container()
+	_build_damage_numbers()
+	_build_combo_display()
+	_setup_minimap()
 
 
 func _build_bottom_left() -> void:
@@ -1355,3 +1361,317 @@ func show_game_over(reason: String, victory: bool) -> void:
 
 	var tween := game_over_screen.create_tween()
 	tween.tween_property(game_over_screen, "modulate:a", 1.0, 0.5)
+
+
+# ============================================
+# DAMAGE NUMBERS SYSTEM
+# ============================================
+
+var damage_number_container: Control
+var active_damage_numbers: Array[Dictionary] = []
+
+func _build_damage_numbers() -> void:
+	damage_number_container = Control.new()
+	damage_number_container.set_anchors_preset(Control.PRESET_FULL_RECT)
+	damage_number_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(damage_number_container)
+
+
+## Show floating damage number at world position
+func show_damage_number(damage: float, world_position: Vector3, is_crit: bool = false, is_headshot: bool = false) -> void:
+	if not damage_number_container:
+		_build_damage_numbers()
+
+	# Find local player camera for projection
+	var camera := _get_local_camera()
+	if not camera:
+		return
+
+	# Check if position is in front of camera
+	var camera_forward := -camera.global_transform.basis.z
+	var to_target := (world_position - camera.global_position).normalized()
+	if camera_forward.dot(to_target) < 0:
+		return
+
+	# Project world position to screen
+	var screen_pos := camera.unproject_position(world_position)
+
+	# Create damage label
+	var label := Label.new()
+	var damage_text := str(int(damage))
+
+	if is_headshot:
+		damage_text = "!" + damage_text + "!"
+	if is_crit:
+		damage_text = damage_text + "!"
+
+	label.text = damage_text
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+
+	# Style based on damage type
+	var font_size := 18
+	var color := Color(1, 1, 1)
+
+	if is_crit and is_headshot:
+		font_size = 28
+		color = Color(1, 0.3, 0.8)  # Pink for crit headshot
+	elif is_headshot:
+		font_size = 24
+		color = Color(1, 0.8, 0.2)  # Gold for headshot
+	elif is_crit:
+		font_size = 22
+		color = Color(1, 0.4, 0.2)  # Orange for crit
+	elif damage >= 50:
+		font_size = 20
+		color = Color(1, 0.6, 0.3)  # Orange-ish for big damage
+	else:
+		font_size = 16
+		color = Color(1, 1, 1)  # White for normal
+
+	label.add_theme_font_size_override("font_size", font_size)
+	label.add_theme_color_override("font_color", color)
+	label.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.8))
+	label.add_theme_constant_override("shadow_offset_x", 2)
+	label.add_theme_constant_override("shadow_offset_y", 2)
+
+	label.position = screen_pos - Vector2(30, 10)
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	damage_number_container.add_child(label)
+
+	# Add random offset for variety
+	var random_offset := Vector2(randf_range(-20, 20), randf_range(-10, 10))
+	label.position += random_offset
+
+	# Track for animation
+	active_damage_numbers.append({
+		"label": label,
+		"world_pos": world_position,
+		"lifetime": 0.0,
+		"max_lifetime": 1.2,
+		"velocity": Vector2(randf_range(-30, 30), -80)  # Float upward
+	})
+
+
+func _update_damage_numbers(delta: float) -> void:
+	var camera := _get_local_camera()
+
+	for i in range(active_damage_numbers.size() - 1, -1, -1):
+		var data: Dictionary = active_damage_numbers[i]
+		data.lifetime += delta
+
+		var label: Label = data.label
+		if not is_instance_valid(label):
+			active_damage_numbers.remove_at(i)
+			continue
+
+		# Update position (float upward)
+		label.position += data.velocity * delta
+		data.velocity.y += 50 * delta  # Gravity effect
+
+		# Fade out
+		var progress: float = data.lifetime / data.max_lifetime
+		label.modulate.a = 1.0 - (progress * progress)  # Quadratic fade
+
+		# Scale down slightly
+		label.scale = Vector2.ONE * (1.0 - progress * 0.3)
+
+		# Remove when done
+		if data.lifetime >= data.max_lifetime:
+			label.queue_free()
+			active_damage_numbers.remove_at(i)
+
+
+func _get_local_camera() -> Camera3D:
+	if _connected_player and is_instance_valid(_connected_player):
+		return _connected_player.camera
+	# Fallback to viewport camera
+	return get_viewport().get_camera_3d()
+
+
+# ============================================
+# MINIMAP SYSTEM
+# ============================================
+
+var minimap_player_marker: ColorRect
+var minimap_markers: Dictionary = {}  # entity_id -> marker node
+var minimap_scale: float = 2.0  # World units per pixel
+
+func _setup_minimap() -> void:
+	if not mini_map_frame:
+		return
+
+	# Clear placeholder
+	for child in mini_map_frame.get_children():
+		child.queue_free()
+
+	# Player marker (center of minimap)
+	minimap_player_marker = ColorRect.new()
+	minimap_player_marker.size = Vector2(6, 6)
+	minimap_player_marker.position = Vector2(mini_map_frame.size.x / 2 - 3, mini_map_frame.size.y / 2 - 3)
+	minimap_player_marker.color = Color(0.2, 0.8, 0.2)  # Green
+	minimap_player_marker.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	mini_map_frame.add_child(minimap_player_marker)
+
+
+func update_minimap(player_pos: Vector3, player_rotation: float) -> void:
+	if not mini_map_frame:
+		return
+
+	# Rotate minimap based on player facing
+	mini_map_frame.rotation = -player_rotation
+
+	# Update other markers (zombies, objectives)
+	_update_minimap_markers(player_pos)
+
+
+func _update_minimap_markers(player_pos: Vector3) -> void:
+	# Get zombies in range
+	var zombies := get_tree().get_nodes_in_group("zombies")
+	var minimap_range := mini_map_frame.size.x * minimap_scale / 2
+
+	# Track which markers to keep
+	var active_ids: Array[int] = []
+
+	for zombie in zombies:
+		if not zombie is CharacterBody3D:
+			continue
+
+		var zombie_pos: Vector3 = zombie.global_position
+		var offset := Vector2(zombie_pos.x - player_pos.x, zombie_pos.z - player_pos.z)
+		var distance := offset.length()
+
+		if distance > minimap_range:
+			continue
+
+		var entity_id: int = zombie.get_instance_id()
+		active_ids.append(entity_id)
+
+		# Get or create marker
+		var marker: ColorRect
+		if entity_id in minimap_markers:
+			marker = minimap_markers[entity_id]
+		else:
+			marker = ColorRect.new()
+			marker.size = Vector2(4, 4)
+			marker.color = Color(0.9, 0.2, 0.2)  # Red for enemies
+			marker.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			mini_map_frame.add_child(marker)
+			minimap_markers[entity_id] = marker
+
+		# Position marker relative to center
+		var screen_offset := offset / minimap_scale
+		marker.position = Vector2(
+			mini_map_frame.size.x / 2 + screen_offset.x - 2,
+			mini_map_frame.size.y / 2 + screen_offset.y - 2
+		)
+
+	# Remove markers for entities no longer in range
+	for entity_id in minimap_markers.keys():
+		if entity_id not in active_ids:
+			var marker: ColorRect = minimap_markers[entity_id]
+			if is_instance_valid(marker):
+				marker.queue_free()
+			minimap_markers.erase(entity_id)
+
+
+func _update_minimap_from_player() -> void:
+	if not _connected_player or not is_instance_valid(_connected_player):
+		return
+
+	var player_pos := _connected_player.global_position
+	var player_rot := _connected_player.look_yaw
+	update_minimap(player_pos, player_rot)
+
+
+# ============================================
+# COMBO SYSTEM
+# ============================================
+
+var combo_count: int = 0
+var combo_timer: float = 0.0
+var combo_timeout: float = 3.0
+var combo_label: Label
+var combo_container: Control
+
+func _build_combo_display() -> void:
+	combo_container = Control.new()
+	combo_container.set_anchors_preset(Control.PRESET_CENTER_RIGHT)
+	combo_container.position = Vector2(-150, -100)
+	combo_container.size = Vector2(140, 60)
+	combo_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	combo_container.visible = false
+	root.add_child(combo_container)
+
+	# Background
+	var bg := ColorRect.new()
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bg.color = Color(0.1, 0.1, 0.12, 0.8)
+	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	combo_container.add_child(bg)
+
+	# Combo text
+	combo_label = Label.new()
+	combo_label.text = "x1"
+	combo_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	combo_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	combo_label.set_anchors_preset(Control.PRESET_FULL_RECT)
+	combo_label.add_theme_font_size_override("font_size", 32)
+	combo_label.add_theme_color_override("font_color", Color(1, 0.8, 0.2))
+	combo_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	combo_container.add_child(combo_label)
+
+
+func add_combo_kill() -> void:
+	combo_count += 1
+	combo_timer = combo_timeout
+
+	if not combo_container:
+		_build_combo_display()
+
+	combo_container.visible = true
+	combo_label.text = "x%d" % combo_count
+
+	# Color based on combo size
+	if combo_count >= 10:
+		combo_label.add_theme_color_override("font_color", Color(1, 0.2, 0.8))  # Pink
+	elif combo_count >= 5:
+		combo_label.add_theme_color_override("font_color", Color(1, 0.4, 0.2))  # Orange
+	else:
+		combo_label.add_theme_color_override("font_color", Color(1, 0.8, 0.2))  # Gold
+
+	# Pulse animation
+	var tween := combo_container.create_tween()
+	tween.tween_property(combo_container, "scale", Vector2(1.2, 1.2), 0.08)
+	tween.tween_property(combo_container, "scale", Vector2(1.0, 1.0), 0.1)
+
+
+func _update_combo(delta: float) -> void:
+	if combo_count > 0:
+		combo_timer -= delta
+		if combo_timer <= 0:
+			_end_combo()
+
+
+func _end_combo() -> void:
+	if combo_count >= 3 and combo_container:
+		# Show final combo message
+		var final_label := Label.new()
+		final_label.text = "%d KILL COMBO!" % combo_count
+		final_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		final_label.set_anchors_preset(Control.PRESET_CENTER)
+		final_label.position = Vector2(-150, 50)
+		final_label.size = Vector2(300, 40)
+		final_label.add_theme_font_size_override("font_size", 24)
+		final_label.add_theme_color_override("font_color", Color(1, 0.8, 0.2))
+		final_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		root.add_child(final_label)
+
+		var tween := final_label.create_tween()
+		tween.tween_property(final_label, "modulate:a", 1.0, 0.1)
+		tween.tween_interval(1.5)
+		tween.tween_property(final_label, "modulate:a", 0.0, 0.5)
+		tween.tween_callback(final_label.queue_free)
+
+	combo_count = 0
+	if combo_container:
+		combo_container.visible = false
