@@ -959,9 +959,15 @@ func _build_wave_display() -> void:
 		GameState.wave_started.connect(_on_wave_started)
 
 
-func _on_wave_started(wave_number: int) -> void:
+func _on_wave_started(wave_number: int, is_boss_wave: bool = false) -> void:
 	current_wave = wave_number
-	wave_label.text = "WAVE %d" % wave_number
+
+	if is_boss_wave:
+		wave_label.text = "BOSS WAVE %d" % wave_number
+		wave_label.add_theme_color_override("font_color", Color(0.9, 0.2, 0.3))
+	else:
+		wave_label.text = "WAVE %d" % wave_number
+		wave_label.add_theme_color_override("font_color", Color(0.9, 0.8, 0.2))
 
 	# Reset kill counter for new wave (keep total kills)
 	# Update zombies remaining from GameState
@@ -975,18 +981,24 @@ func _on_wave_started(wave_number: int) -> void:
 	tween.tween_property(wave_container, "modulate", Color.WHITE, 0.3)
 
 	# Show wave announcement popup
-	_show_wave_announcement(wave_number)
+	_show_wave_announcement(wave_number, is_boss_wave)
 
 
-func _show_wave_announcement(wave_number: int) -> void:
+func _show_wave_announcement(wave_number: int, is_boss_wave: bool = false) -> void:
 	var announce := Label.new()
-	announce.text = "WAVE %d" % wave_number
+
+	if is_boss_wave:
+		announce.text = "BOSS WAVE %d" % wave_number
+		announce.add_theme_color_override("font_color", Color(0.9, 0.2, 0.3))  # Red for boss
+	else:
+		announce.text = "WAVE %d" % wave_number
+		announce.add_theme_color_override("font_color", Color(1, 0.9, 0.3))  # Gold for normal
+
 	announce.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	announce.set_anchors_preset(Control.PRESET_CENTER)
 	announce.position = Vector2(-200, -100)
 	announce.size = Vector2(400, 100)
-	announce.add_theme_font_size_override("font_size", 48)
-	announce.add_theme_color_override("font_color", Color(1, 0.9, 0.3))
+	announce.add_theme_font_size_override("font_size", 48 if not is_boss_wave else 56)
 	announce.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.8))
 	announce.add_theme_constant_override("shadow_offset_x", 3)
 	announce.add_theme_constant_override("shadow_offset_y", 3)
@@ -997,9 +1009,21 @@ func _show_wave_announcement(wave_number: int) -> void:
 	announce.modulate.a = 0
 	var tween := announce.create_tween()
 	tween.tween_property(announce, "modulate:a", 1.0, 0.2)
-	tween.tween_interval(1.5)
+
+	# Boss waves get extra dramatic effect
+	if is_boss_wave:
+		# Add screen shake effect by shaking the label
+		for i in range(6):
+			tween.tween_property(announce, "position:x", -200 + randf_range(-10, 10), 0.05)
+		tween.tween_property(announce, "position:x", -200, 0.1)
+
+	tween.tween_interval(1.5 if not is_boss_wave else 2.5)
 	tween.tween_property(announce, "modulate:a", 0.0, 0.5)
 	tween.tween_callback(announce.queue_free)
+
+	# Show boss warning subtitle for boss waves
+	if is_boss_wave:
+		_show_boss_warning()
 
 
 # ============================================
@@ -1675,3 +1699,57 @@ func _end_combo() -> void:
 	combo_count = 0
 	if combo_container:
 		combo_container.visible = false
+
+
+func _show_boss_warning() -> void:
+	var warning := Label.new()
+	warning.text = "BOSS INCOMING"
+	warning.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	warning.set_anchors_preset(Control.PRESET_CENTER)
+	warning.position = Vector2(-150, -40)
+	warning.size = Vector2(300, 30)
+	warning.add_theme_font_size_override("font_size", 24)
+	warning.add_theme_color_override("font_color", Color(1, 0.4, 0.4))
+	warning.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.8))
+	warning.add_theme_constant_override("shadow_offset_x", 2)
+	warning.add_theme_constant_override("shadow_offset_y", 2)
+	warning.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(warning)
+
+	warning.modulate.a = 0
+	var tween := warning.create_tween()
+	tween.tween_property(warning, "modulate:a", 1.0, 0.3).set_delay(0.5)
+	tween.tween_interval(2.0)
+	tween.tween_property(warning, "modulate:a", 0.0, 0.5)
+	tween.tween_callback(warning.queue_free)
+
+
+## Show boss killed announcement
+func show_boss_killed() -> void:
+	var killed := Label.new()
+	killed.text = "BOSS DEFEATED!"
+	killed.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	killed.set_anchors_preset(Control.PRESET_CENTER)
+	killed.position = Vector2(-200, -60)
+	killed.size = Vector2(400, 60)
+	killed.add_theme_font_size_override("font_size", 40)
+	killed.add_theme_color_override("font_color", Color(0.9, 0.8, 0.2))
+	killed.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.8))
+	killed.add_theme_constant_override("shadow_offset_x", 3)
+	killed.add_theme_constant_override("shadow_offset_y", 3)
+	killed.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(killed)
+
+	killed.modulate.a = 0
+	killed.scale = Vector2(0.5, 0.5)
+	killed.pivot_offset = killed.size / 2
+
+	var tween := killed.create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(killed, "modulate:a", 1.0, 0.2)
+	tween.tween_property(killed, "scale", Vector2(1.1, 1.1), 0.3).set_trans(Tween.TRANS_BACK)
+	tween.set_parallel(false)
+	tween.tween_property(killed, "scale", Vector2(1.0, 1.0), 0.1)
+	tween.tween_interval(2.0)
+	tween.tween_property(killed, "modulate:a", 0.0, 0.5)
+	tween.tween_callback(killed.queue_free)
