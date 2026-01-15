@@ -105,6 +105,12 @@ var game_over_title: Label
 var game_over_stats: Label
 var is_dead: bool = false
 
+# Downed/Revive display
+var downed_screen: Control
+var downed_timer_label: Label
+var revive_progress_bar: ProgressBar
+var is_downed: bool = false
+
 # Connection tracking
 var _connected_player: PlayerController = null
 
@@ -147,6 +153,7 @@ func _build_ui() -> void:
 	_build_stats_display()
 	_build_extraction_display()
 	_build_death_screen()
+	_build_downed_screen()
 	_build_game_over_screen()
 	_build_xp_popup_container()
 	_build_damage_numbers()
@@ -1124,6 +1131,34 @@ func _on_network_event(event_name: String, data: Dictionary) -> void:
 			var local_peer := multiplayer.get_unique_id() if multiplayer else 0
 			if target_peer == local_peer:
 				_show_acid_hit_effect()
+		"player_downed":
+			# A player went down
+			var downed_peer: int = data.get("peer_id", 0)
+			var local_peer_2 := multiplayer.get_unique_id() if multiplayer else 0
+			if downed_peer == local_peer_2:
+				_show_downed_screen()
+			else:
+				_show_teammate_downed_notification(downed_peer)
+		"player_revived":
+			# A player was revived
+			var revived_peer: int = data.get("peer_id", 0)
+			var local_peer_3 := multiplayer.get_unique_id() if multiplayer else 0
+			if revived_peer == local_peer_3:
+				_hide_downed_screen()
+		"bleedout_progress":
+			# Update bleedout timer display
+			var bleedout_peer: int = data.get("peer_id", 0)
+			var local_peer_4 := multiplayer.get_unique_id() if multiplayer else 0
+			if bleedout_peer == local_peer_4:
+				var time_left: float = data.get("time_remaining", 0.0)
+				_update_bleedout_timer(time_left)
+		"revive_progress":
+			# Show revive progress
+			var target_peer_2: int = data.get("target_peer", 0)
+			var local_peer_5 := multiplayer.get_unique_id() if multiplayer else 0
+			if target_peer_2 == local_peer_5:
+				var progress: float = data.get("progress", 0.0)
+				_update_revive_progress(progress)
 
 
 func _zombie_type_to_name(type: int) -> String:
@@ -1571,6 +1606,177 @@ func hide_death_screen() -> void:
 	var tween := death_screen.create_tween()
 	tween.tween_property(death_screen, "modulate:a", 0.0, 0.3)
 	tween.tween_callback(func(): death_screen.visible = false)
+
+
+# ============================================
+# DOWNED/REVIVE SCREEN
+# ============================================
+
+func _build_downed_screen() -> void:
+	downed_screen = Control.new()
+	downed_screen.set_anchors_preset(Control.PRESET_FULL_RECT)
+	downed_screen.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	downed_screen.visible = false
+	root.add_child(downed_screen)
+
+	# Red pulsing overlay
+	var overlay := ColorRect.new()
+	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	overlay.color = Color(0.3, 0.0, 0.0, 0.6)
+	overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	downed_screen.add_child(overlay)
+
+	# DOWNED text
+	var downed_label := Label.new()
+	downed_label.text = "DOWNED"
+	downed_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	downed_label.set_anchors_preset(Control.PRESET_CENTER)
+	downed_label.position = Vector2(-200, -80)
+	downed_label.size = Vector2(400, 80)
+	downed_label.add_theme_font_size_override("font_size", 56)
+	downed_label.add_theme_color_override("font_color", Color(0.9, 0.2, 0.2))
+	downed_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	downed_screen.add_child(downed_label)
+
+	# Bleedout timer label
+	downed_timer_label = Label.new()
+	downed_timer_label.text = "Bleeding out: 30s"
+	downed_timer_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	downed_timer_label.set_anchors_preset(Control.PRESET_CENTER)
+	downed_timer_label.position = Vector2(-150, 0)
+	downed_timer_label.size = Vector2(300, 30)
+	downed_timer_label.add_theme_font_size_override("font_size", 24)
+	downed_timer_label.add_theme_color_override("font_color", Color(1.0, 0.8, 0.3))
+	downed_timer_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	downed_screen.add_child(downed_timer_label)
+
+	# Revive progress bar
+	revive_progress_bar = ProgressBar.new()
+	revive_progress_bar.set_anchors_preset(Control.PRESET_CENTER)
+	revive_progress_bar.position = Vector2(-150, 40)
+	revive_progress_bar.size = Vector2(300, 20)
+	revive_progress_bar.min_value = 0
+	revive_progress_bar.max_value = 100
+	revive_progress_bar.value = 0
+	revive_progress_bar.show_percentage = false
+	revive_progress_bar.visible = false
+	revive_progress_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	# Style the progress bar
+	var bar_style := StyleBoxFlat.new()
+	bar_style.bg_color = Color(0.2, 0.6, 0.2)
+	bar_style.corner_radius_top_left = 4
+	bar_style.corner_radius_top_right = 4
+	bar_style.corner_radius_bottom_left = 4
+	bar_style.corner_radius_bottom_right = 4
+	revive_progress_bar.add_theme_stylebox_override("fill", bar_style)
+
+	var bar_bg := StyleBoxFlat.new()
+	bar_bg.bg_color = Color(0.15, 0.15, 0.18)
+	bar_bg.corner_radius_top_left = 4
+	bar_bg.corner_radius_top_right = 4
+	bar_bg.corner_radius_bottom_left = 4
+	bar_bg.corner_radius_bottom_right = 4
+	revive_progress_bar.add_theme_stylebox_override("background", bar_bg)
+	downed_screen.add_child(revive_progress_bar)
+
+	# Revive hint
+	var revive_hint := Label.new()
+	revive_hint.text = "Waiting for teammate to revive..."
+	revive_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	revive_hint.set_anchors_preset(Control.PRESET_CENTER)
+	revive_hint.position = Vector2(-200, 70)
+	revive_hint.size = Vector2(400, 25)
+	revive_hint.add_theme_font_size_override("font_size", 16)
+	revive_hint.add_theme_color_override("font_color", Color(0.6, 0.6, 0.65))
+	revive_hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	downed_screen.add_child(revive_hint)
+
+
+func _show_downed_screen() -> void:
+	is_downed = true
+	downed_screen.visible = true
+	downed_screen.modulate.a = 0
+	revive_progress_bar.visible = false
+	revive_progress_bar.value = 0
+
+	var tween := downed_screen.create_tween()
+	tween.tween_property(downed_screen, "modulate:a", 1.0, 0.3)
+
+	# Start pulsing animation on overlay
+	var overlay: ColorRect = downed_screen.get_child(0) as ColorRect
+	if overlay:
+		var pulse := overlay.create_tween()
+		pulse.set_loops()
+		pulse.tween_property(overlay, "color:a", 0.75, 0.8)
+		pulse.tween_property(overlay, "color:a", 0.4, 0.8)
+
+
+func _hide_downed_screen() -> void:
+	is_downed = false
+
+	var tween := downed_screen.create_tween()
+	tween.tween_property(downed_screen, "modulate:a", 0.0, 0.3)
+	tween.tween_callback(func():
+		downed_screen.visible = false
+		# Stop overlay pulsing
+		var overlay: ColorRect = downed_screen.get_child(0) as ColorRect
+		if overlay:
+			var existing_tweens := get_tree().get_processed_tweens()
+			for t in existing_tweens:
+				if t.is_valid() and t.get_loops_left() > 0:
+					t.kill()
+	)
+
+
+func _update_bleedout_timer(time_left: float) -> void:
+	if downed_timer_label:
+		downed_timer_label.text = "Bleeding out: %ds" % int(ceil(time_left))
+		# Change color as time runs out
+		if time_left <= 10:
+			downed_timer_label.add_theme_color_override("font_color", Color(1.0, 0.3, 0.2))
+		elif time_left <= 20:
+			downed_timer_label.add_theme_color_override("font_color", Color(1.0, 0.6, 0.2))
+		else:
+			downed_timer_label.add_theme_color_override("font_color", Color(1.0, 0.8, 0.3))
+
+
+func _update_revive_progress(progress: float) -> void:
+	if revive_progress_bar:
+		revive_progress_bar.visible = progress > 0
+		revive_progress_bar.value = progress * 100.0
+
+
+func _show_teammate_downed_notification(peer_id: int) -> void:
+	# Get player name if available
+	var player_name := "Teammate"
+	if peer_id in GameState.players:
+		var player: PlayerController = GameState.players[peer_id]
+		if player and player.player_name:
+			player_name = player.player_name
+
+	# Create notification popup
+	var notification := Label.new()
+	notification.text = "%s is DOWN!" % player_name
+	notification.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	notification.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	notification.position = Vector2(-200, 100)
+	notification.size = Vector2(400, 40)
+	notification.add_theme_font_size_override("font_size", 24)
+	notification.add_theme_color_override("font_color", Color(1.0, 0.4, 0.2))
+	notification.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.8))
+	notification.add_theme_constant_override("shadow_offset_x", 2)
+	notification.add_theme_constant_override("shadow_offset_y", 2)
+	notification.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(notification)
+
+	# Animate and remove
+	notification.modulate.a = 0
+	var tween := notification.create_tween()
+	tween.tween_property(notification, "modulate:a", 1.0, 0.2)
+	tween.tween_interval(3.0)
+	tween.tween_property(notification, "modulate:a", 0.0, 0.5)
+	tween.tween_callback(notification.queue_free)
 
 
 # ============================================

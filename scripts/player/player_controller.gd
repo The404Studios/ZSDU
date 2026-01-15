@@ -14,6 +14,8 @@ class_name PlayerController
 
 signal player_ready()
 signal player_died()
+signal player_downed()
+signal player_revived()
 signal player_spawned(position: Vector3)
 
 # Player identity
@@ -25,6 +27,16 @@ var is_local_player := false
 @export var max_health := 100.0
 var health: float = 100.0
 var is_dead := false
+
+# Downed/Revive system
+var is_downed := false
+var bleedout_timer: float = 0.0
+const BLEEDOUT_TIME: float = 30.0  # Time to revive before death
+const REVIVE_TIME: float = 4.0  # Time to complete revival
+var reviving_player: PlayerController = null  # Who is reviving us
+var being_revived_by: int = 0  # Peer ID of player reviving us
+var revive_progress: float = 0.0
+var down_count: int = 0  # Gets harder to revive after multiple downs
 
 # Mouse look
 var look_yaw: float = 0.0
@@ -247,9 +259,17 @@ func _physics_process(delta: float) -> void:
 	if is_dead:
 		return
 
-	# Health regeneration (server-authoritative)
+	# Process downed state (server-authoritative)
 	if NetworkManager and NetworkManager.is_authority():
-		_process_health_regen(delta)
+		if is_downed:
+			_process_downed_state(delta)
+			return  # Skip normal processing while downed
+		else:
+			_process_health_regen(delta)
+
+	# Skip normal processing if downed
+	if is_downed:
+		return
 
 	# Network controller handles all the tick logic based on authority
 	# Movement and combat are processed there
@@ -371,11 +391,16 @@ func apply_input(input_data: Dictionary) -> void:
 ## Take damage (server-side only)
 ## damage_type: "bullet", "blunt", "pierce", "zombie"
 ## is_headshot: True if the hit was to the head
-func take_damage(amount: float, _from_position: Vector3 = Vector3.ZERO, damage_type: String = "bullet", is_headshot: bool = false) -> void:
+func take_damage(amount: float, from_position: Vector3 = Vector3.ZERO, damage_type: String = "bullet", is_headshot: bool = false) -> void:
 	if not NetworkManager.is_authority():
 		return
 
 	if is_dead:
+		return
+
+	# Downed players take reduced damage but still bleed out faster
+	if is_downed:
+		bleedout_timer += amount * 0.1  # Damage accelerates bleedout
 		return
 
 	# Apply armor reduction
@@ -385,20 +410,152 @@ func take_damage(amount: float, _from_position: Vector3 = Vector3.ZERO, damage_t
 
 	health -= final_damage
 
+	# Broadcast damage event for direction indicator
+	NetworkManager.broadcast_event.rpc("player_damaged", {
+		"peer_id": peer_id,
+		"source_position": from_position,
+		"damage": final_damage
+	})
+
 	if health <= 0:
 		health = 0
-		_die()
+		_go_down()
 
 
-## Die (server-side)
+## Go down (can be revived)
+func _go_down() -> void:
+	if is_downed or is_dead:
+		return
+
+	is_downed = true
+	down_count += 1
+	bleedout_timer = 0.0
+	revive_progress = 0.0
+
+	# Cancel any movement
+	velocity = Vector3.ZERO
+
+	if animation_controller:
+		animation_controller.play_down()
+
+	player_downed.emit()
+
+	# Broadcast downed event
+	NetworkManager.broadcast_event.rpc("player_downed", {
+		"peer_id": peer_id,
+		"position": global_position,
+		"down_count": down_count
+	})
+
+	print("[Player] %d went down (count: %d)" % [peer_id, down_count])
+
+
+## Die (permanent death)
 func _die() -> void:
+	if is_dead:
+		return
+
 	is_dead = true
+	is_downed = false
 
 	if animation_controller:
 		animation_controller.play_death()
 
 	player_died.emit()
 	GameState.player_died.emit(peer_id)
+
+	# Broadcast death event
+	NetworkManager.broadcast_event.rpc("player_died", {
+		"peer_id": peer_id,
+		"position": global_position
+	})
+
+
+## Revive (called when revive completes)
+func revive() -> void:
+	if not NetworkManager.is_authority():
+		return
+
+	if not is_downed or is_dead:
+		return
+
+	is_downed = false
+	revive_progress = 0.0
+	being_revived_by = 0
+
+	# Restore some health (less each time downed)
+	var revive_health := max_health * (0.5 - down_count * 0.1)
+	health = maxf(revive_health, max_health * 0.2)
+
+	if animation_controller:
+		animation_controller.play_revive()
+
+	player_revived.emit()
+
+	# Broadcast revive event
+	NetworkManager.broadcast_event.rpc("player_revived", {
+		"peer_id": peer_id,
+		"health": health
+	})
+
+	print("[Player] %d was revived with %.0f HP" % [peer_id, health])
+
+
+## Start reviving this player (called by another player)
+func start_revive(reviver_peer_id: int) -> void:
+	if not is_downed or is_dead or being_revived_by != 0:
+		return
+
+	being_revived_by = reviver_peer_id
+	revive_progress = 0.0
+
+	# Broadcast revive started
+	NetworkManager.broadcast_event.rpc("revive_started", {
+		"target_peer": peer_id,
+		"reviver_peer": reviver_peer_id
+	})
+
+
+## Cancel reviving
+func cancel_revive() -> void:
+	if being_revived_by == 0:
+		return
+
+	var reviver := being_revived_by
+	being_revived_by = 0
+	revive_progress = 0.0
+
+	# Broadcast revive cancelled
+	NetworkManager.broadcast_event.rpc("revive_cancelled", {
+		"target_peer": peer_id,
+		"reviver_peer": reviver
+	})
+
+
+## Update revive progress (called each frame by reviving player)
+func update_revive_progress(delta: float, reviver_peer_id: int) -> bool:
+	if not is_downed or is_dead:
+		return false
+
+	if being_revived_by != reviver_peer_id:
+		return false
+
+	# Calculate revive speed (slower after multiple downs)
+	var revive_mult := 1.0 - down_count * 0.15
+	revive_progress += delta * revive_mult
+
+	# Broadcast progress for UI
+	NetworkManager.broadcast_event.rpc("revive_progress", {
+		"target_peer": peer_id,
+		"reviver_peer": reviver_peer_id,
+		"progress": revive_progress / REVIVE_TIME
+	})
+
+	if revive_progress >= REVIVE_TIME:
+		revive()
+		return true
+
+	return false
 
 
 ## Respawn (server-side)
@@ -440,6 +597,31 @@ func _process_health_regen(delta: float) -> void:
 	# Apply regeneration
 	if health_regen > 0:
 		health = minf(health + health_regen * delta, max_health)
+
+
+## Process downed state (server-side) - bleedout timer
+func _process_downed_state(delta: float) -> void:
+	if not is_downed:
+		return
+
+	# Update bleedout timer
+	bleedout_timer += delta
+
+	# Faster bleedout after multiple downs
+	var bleedout_mult := 1.0 + down_count * 0.2
+	var effective_bleedout := BLEEDOUT_TIME / bleedout_mult
+
+	# Broadcast bleedout progress for HUD
+	if int(bleedout_timer * 2) % 2 == 0:  # Every 0.5 seconds
+		NetworkManager.broadcast_event.rpc("bleedout_progress", {
+			"peer_id": peer_id,
+			"progress": bleedout_timer / effective_bleedout,
+			"time_remaining": effective_bleedout - bleedout_timer
+		})
+
+	# Check if bleed out
+	if bleedout_timer >= effective_bleedout:
+		_die()
 
 
 # ============================================
