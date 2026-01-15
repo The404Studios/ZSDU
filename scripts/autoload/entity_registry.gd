@@ -606,7 +606,7 @@ func spawn_corpse(position: Vector3, zombie_type: String = "walker") -> Node3D:
 	# Register entity
 	var net_id := register_entity(corpse, EntityType.CORPSE)
 
-	# Add loot component
+	# Add loot component (scrap for team currency)
 	var loot_value := _get_zombie_loot_value(zombie_type)
 	add_component(net_id, "loot", {
 		"items": {"scrap": loot_value},
@@ -616,7 +616,124 @@ func spawn_corpse(position: Vector3, zombie_type: String = "walker") -> Node3D:
 	# Add rigid component (not rigid yet)
 	add_component(net_id, "rigid", {"is_rigid": false})
 
+	# Also spawn individual loot drops (Tarkov-style items for player inventory)
+	_spawn_zombie_loot_drops(position, zombie_type)
+
 	return corpse
+
+
+## Spawn individual loot drops from zombie death (Tarkov-style)
+func _spawn_zombie_loot_drops(position: Vector3, zombie_type: String) -> void:
+	# Get possible loot based on zombie type
+	var loot_table := _get_zombie_loot_table(zombie_type)
+
+	# Roll for each loot entry
+	for entry in loot_table:
+		if randf() < entry.chance:
+			var drop_pos := position + Vector3(
+				randf_range(-0.5, 0.5),
+				0.2,
+				randf_range(-0.5, 0.5)
+			)
+			spawn_loot_drop(drop_pos, entry.def_id, entry.get("stack", 1))
+
+
+## Get loot table for zombie type
+func _get_zombie_loot_table(zombie_type: String) -> Array:
+	match zombie_type:
+		"walker":
+			return [
+				{"def_id": "ammo_pistol", "chance": 0.15, "stack": randi_range(2, 5)},
+				{"def_id": "bandage", "chance": 0.10, "stack": 1},
+				{"def_id": "scrap_metal", "chance": 0.20, "stack": randi_range(1, 3)},
+			]
+		"runner":
+			return [
+				{"def_id": "ammo_pistol", "chance": 0.20, "stack": randi_range(3, 8)},
+				{"def_id": "energy_drink", "chance": 0.15, "stack": 1},
+				{"def_id": "scrap_metal", "chance": 0.25, "stack": randi_range(2, 4)},
+			]
+		"brute":
+			return [
+				{"def_id": "ammo_rifle", "chance": 0.30, "stack": randi_range(5, 15)},
+				{"def_id": "medkit", "chance": 0.20, "stack": 1},
+				{"def_id": "armor_plate", "chance": 0.10, "stack": 1},
+				{"def_id": "scrap_metal", "chance": 0.40, "stack": randi_range(3, 6)},
+			]
+		"crawler":
+			return [
+				{"def_id": "ammo_pistol", "chance": 0.10, "stack": randi_range(1, 3)},
+				{"def_id": "scrap_metal", "chance": 0.15, "stack": 1},
+			]
+		_:
+			return [
+				{"def_id": "scrap_metal", "chance": 0.20, "stack": 1},
+			]
+
+
+## Spawn a loot pickup in the world
+func spawn_loot_drop(position: Vector3, def_id: String, stack: int = 1, durability: float = 1.0, mods: Array = []) -> Node3D:
+	if not NetworkManager.is_authority():
+		return null
+
+	# Load LootPickup script
+	var LootPickupScript: GDScript = null
+	if ResourceLoader.exists("res://scripts/world/loot_pickup.gd"):
+		LootPickupScript = load("res://scripts/world/loot_pickup.gd")
+
+	if not LootPickupScript:
+		push_warning("[EntityRegistry] LootPickup script not found, skipping drop")
+		return null
+
+	var loot: Area3D = LootPickupScript.new()
+	loot.name = "Loot_%d" % _next_id
+	loot.global_position = position
+
+	# Add to world
+	if GameState.world_node:
+		GameState.world_node.add_child(loot)
+	else:
+		push_error("[EntityRegistry] No world_node for loot drop")
+		loot.queue_free()
+		return null
+
+	# Initialize loot data
+	loot.setup(def_id, stack, durability, mods)
+
+	# Register entity
+	var net_id := register_entity(loot, EntityType.LOOTBAG)
+	loot.loot_id = net_id
+
+	# Add loot component
+	add_component(net_id, "loot", {
+		"def_id": def_id,
+		"stack": stack,
+		"durability": durability,
+		"mods": mods,
+		"picked_up": false
+	})
+
+	# Broadcast loot spawned
+	_broadcast_entity_event.rpc(net_id, "loot_spawned", {
+		"position": position,
+		"def_id": def_id,
+		"stack": stack
+	})
+
+	print("[EntityRegistry] Spawned loot: %s x%d at %s" % [def_id, stack, position])
+	return loot
+
+
+## Remove loot from world (called when picked up)
+func remove_loot(net_id: int) -> void:
+	if not NetworkManager.is_authority():
+		return
+
+	if net_id in entities:
+		var loot: Node = entities[net_id]
+		if is_instance_valid(loot):
+			loot.queue_free()
+		unregister_entity(net_id)
 
 
 ## Spawn a shop at position

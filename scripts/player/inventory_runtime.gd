@@ -19,6 +19,8 @@ signal weapon_equipped(slot: int, weapon: WeaponRuntime)
 signal ammo_changed(ammo_type: String, count: int)
 signal loot_picked_up(def_id: String, stack: int)
 signal loadout_ready()
+signal pickup_started(def_id: String, duration: float)
+signal pickup_completed(def_id: String)
 
 # Weapon slots (primary, secondary, melee)
 var weapons: Array[WeaponRuntime] = [null, null, null]
@@ -40,6 +42,14 @@ var loadout_iids: Dictionary = {}  # slot -> iid
 # Character info
 var character_id: String = ""
 var raid_id: String = ""
+
+# Container capacity (from equipment)
+var max_container_slots: int = 20  # Default, overridden by equipment
+var max_weight: float = 50.0  # Default carry weight
+var current_weight: float = 0.0
+
+# Loot pickup timing
+const BASE_LOOT_PICKUP_TIME := 0.5  # Base time to pickup loot
 
 
 func _ready() -> void:
@@ -205,7 +215,10 @@ func _reload_done() -> void:
 
 ## Pick up loot during raid
 func pickup_loot(def_id: String, stack: int = 1, durability: float = 1.0, mods: Array = []) -> bool:
-	# Check if we have space (simplified: always allow for now)
+	# Check if we have space
+	if not can_pickup_loot(def_id, stack):
+		return false
+
 	var loot_entry := {
 		"def_id": def_id,
 		"stack": stack,
@@ -214,17 +227,68 @@ func pickup_loot(def_id: String, stack: int = 1, durability: float = 1.0, mods: 
 	}
 
 	provisional_loot.append(loot_entry)
+
+	# Update weight tracking
+	var item_weight := _get_item_weight(def_id) * stack
+	current_weight += item_weight
+
 	loot_picked_up.emit(def_id, stack)
 
 	# Report to RaidManager
 	if RaidManager and NetworkManager and NetworkManager.is_authority():
-		var parent = get_parent()
+		var parent := get_parent()
 		if parent:
-			var peer_id = parent.get("peer_id")
+			var peer_id := parent.get("peer_id")
 			if peer_id:
 				RaidManager.add_provisional_loot(peer_id, def_id, stack, durability, mods)
 
 	return true
+
+
+## Check if we can pickup loot (capacity check)
+func can_pickup_loot(def_id: String, stack: int = 1) -> bool:
+	# Check slot count
+	if provisional_loot.size() >= max_container_slots:
+		return false
+
+	# Check weight (if we have weight limits)
+	var item_weight := _get_item_weight(def_id) * stack
+	if current_weight + item_weight > max_weight:
+		return false
+
+	return true
+
+
+## Get loot pickup time (affected by loot_speed equipment stat)
+func get_loot_pickup_time() -> float:
+	var base_time := BASE_LOOT_PICKUP_TIME
+
+	# Apply loot_speed modifier from equipment (faster = shorter time)
+	var parent := get_parent()
+	if parent and parent.has_method("get") and parent.get("equipment_runtime"):
+		var equipment: EquipmentRuntime = parent.equipment_runtime
+		var loot_speed: float = equipment.get_stat("loot_speed")
+		if loot_speed > 0:
+			return base_time / loot_speed  # 1.5x speed = 0.33x time
+
+	return base_time
+
+
+## Get item weight from definition
+func _get_item_weight(def_id: String) -> float:
+	if EconomyService:
+		var item_def: Dictionary = EconomyService.get_item_def(def_id)
+		return item_def.get("weight", 0.1)  # Default small weight
+	return 0.1
+
+
+## Update container capacity from equipment
+func update_capacity_from_equipment(equipment: EquipmentRuntime) -> void:
+	if not equipment:
+		return
+
+	max_container_slots = 20 + int(equipment.get_stat("container_slots"))
+	max_weight = 50.0 + equipment.get_stat("backpack_capacity")
 
 
 ## Get provisional loot for raid commit

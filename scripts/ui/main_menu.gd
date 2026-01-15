@@ -18,6 +18,9 @@ var settings_panel: PanelContainer = null
 # Main menu buttons
 var play_button: Button = null
 var stash_button: Button = null
+var character_button: Button = null
+var traders_button: Button = null
+var market_button: Button = null
 var settings_button: Button = null
 var quit_button: Button = null
 
@@ -152,8 +155,8 @@ func _create_main_menu() -> void:
 	main_panel = PanelContainer.new()
 	main_panel.name = "MainPanel"
 	main_panel.set_anchors_preset(Control.PRESET_CENTER)
-	main_panel.custom_minimum_size = Vector2(320, 350)
-	main_panel.position = Vector2(-160, -100)
+	main_panel.custom_minimum_size = Vector2(320, 520)
+	main_panel.position = Vector2(-160, -180)
 	add_child(main_panel)
 
 	var vbox := VBoxContainer.new()
@@ -169,7 +172,7 @@ func _create_main_menu() -> void:
 	main_panel.add_child(margin)
 
 	var inner_vbox := VBoxContainer.new()
-	inner_vbox.add_theme_constant_override("separation", 15)
+	inner_vbox.add_theme_constant_override("separation", 12)
 	margin.add_child(inner_vbox)
 
 	# Play button (opens play submenu)
@@ -177,10 +180,25 @@ func _create_main_menu() -> void:
 	play_button.pressed.connect(_on_play_pressed)
 	inner_vbox.add_child(play_button)
 
+	# Character button (skills, attributes, gear)
+	character_button = _create_menu_button("CHARACTER", Color(0.6, 0.4, 0.7))
+	character_button.pressed.connect(_on_character_pressed)
+	inner_vbox.add_child(character_button)
+
 	# Stash button
 	stash_button = _create_menu_button("STASH", Color(0.3, 0.5, 0.8))
 	stash_button.pressed.connect(_on_stash_pressed)
 	inner_vbox.add_child(stash_button)
+
+	# Traders button
+	traders_button = _create_menu_button("TRADERS", Color(0.7, 0.6, 0.3))
+	traders_button.pressed.connect(_on_traders_pressed)
+	inner_vbox.add_child(traders_button)
+
+	# Market button
+	market_button = _create_menu_button("MARKET", Color(0.3, 0.7, 0.6))
+	market_button.pressed.connect(_on_market_pressed)
+	inner_vbox.add_child(market_button)
 
 	# Settings button
 	settings_button = _create_menu_button("SETTINGS", Color(0.5, 0.5, 0.5))
@@ -189,7 +207,7 @@ func _create_main_menu() -> void:
 
 	# Spacer
 	var spacer := Control.new()
-	spacer.custom_minimum_size = Vector2(0, 20)
+	spacer.custom_minimum_size = Vector2(0, 10)
 	inner_vbox.add_child(spacer)
 
 	# Quit button
@@ -564,6 +582,33 @@ func _on_stash_pressed() -> void:
 	_open_menu_manager()
 
 
+func _on_character_pressed() -> void:
+	if not EconomyService or not EconomyService.is_logged_in:
+		status_label.text = "Login required for character access"
+		status_label.add_theme_color_override("font_color", Color.ORANGE)
+		return
+
+	_open_character_screen()
+
+
+func _on_traders_pressed() -> void:
+	if not EconomyService or not EconomyService.is_logged_in:
+		status_label.text = "Login required for traders"
+		status_label.add_theme_color_override("font_color", Color.ORANGE)
+		return
+
+	_open_traders_screen()
+
+
+func _on_market_pressed() -> void:
+	if not EconomyService or not EconomyService.is_logged_in:
+		status_label.text = "Login required for market"
+		status_label.add_theme_color_override("font_color", Color.ORANGE)
+		return
+
+	_open_market_screen()
+
+
 func _on_settings_pressed() -> void:
 	status_label.text = "Settings not yet implemented"
 	status_label.add_theme_color_override("font_color", Color.GRAY)
@@ -837,3 +882,88 @@ func _on_loadout_ready(loadout: Dictionary) -> void:
 ## Get the current loadout for spawning
 func get_current_loadout() -> Dictionary:
 	return current_loadout
+
+
+# ============================================
+# DIRECT SCREEN ACCESS
+# ============================================
+
+var character_screen: Control = null
+var traders_screen_direct: Control = null
+var market_screen_direct: Control = null
+
+
+func _open_character_screen() -> void:
+	# Hide main menu panels
+	if main_panel:
+		main_panel.visible = false
+	if play_panel:
+		play_panel.visible = false
+
+	# Create character screen if doesn't exist
+	if not character_screen:
+		var CharacterScreenScript: GDScript = null
+		if ResourceLoader.exists("res://scripts/ui/character/character_screen.gd"):
+			CharacterScreenScript = preload("res://scripts/ui/character/character_screen.gd")
+
+		if CharacterScreenScript:
+			character_screen = CharacterScreenScript.new()
+			character_screen.set_anchors_preset(Control.PRESET_FULL_RECT)
+			if character_screen.has_signal("screen_closed"):
+				character_screen.screen_closed.connect(_on_character_screen_closed)
+			add_child(character_screen)
+		else:
+			status_label.text = "Character screen not yet implemented"
+			status_label.add_theme_color_override("font_color", Color.ORANGE)
+			_show_main_menu()
+			return
+
+	character_screen.visible = true
+	if character_screen.has_method("open"):
+		character_screen.open()
+
+
+func _on_character_screen_closed() -> void:
+	if character_screen:
+		character_screen.visible = false
+	_show_main_menu()
+
+
+func _open_traders_screen() -> void:
+	# Hide main menu panels
+	if main_panel:
+		main_panel.visible = false
+	if play_panel:
+		play_panel.visible = false
+
+	# Use menu manager but go directly to traders
+	if not menu_manager:
+		var MenuManagerScript := preload("res://scripts/ui/menu_manager.gd")
+		menu_manager = MenuManagerScript.new()
+		menu_manager.set_anchors_preset(Control.PRESET_FULL_RECT)
+		menu_manager.ready_for_game.connect(_on_loadout_ready)
+		menu_manager.back_to_main_menu.connect(_on_menu_manager_closed)
+		add_child(menu_manager)
+
+	menu_manager.visible = true
+	menu_manager.show_traders()
+
+
+func _open_market_screen() -> void:
+	# Hide main menu panels
+	if main_panel:
+		main_panel.visible = false
+	if play_panel:
+		play_panel.visible = false
+
+	# Use menu manager but go directly to market
+	if not menu_manager:
+		var MenuManagerScript := preload("res://scripts/ui/menu_manager.gd")
+		menu_manager = MenuManagerScript.new()
+		menu_manager.set_anchors_preset(Control.PRESET_FULL_RECT)
+		menu_manager.ready_for_game.connect(_on_loadout_ready)
+		menu_manager.back_to_main_menu.connect(_on_menu_manager_closed)
+		add_child(menu_manager)
+
+	menu_manager.visible = true
+	menu_manager.show_market()

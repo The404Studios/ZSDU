@@ -13,6 +13,7 @@ extends Node3D
 @onready var props_container: Node = $Props
 @onready var spawn_points: Node = $SpawnPoints
 @onready var wave_manager: WaveManager = $WaveManager if has_node("WaveManager") else null
+@onready var hud: Node = $HUD if has_node("HUD") else null
 @onready var hud = $HUD if has_node("HUD") else null
 
 # Sigil (defense objective)
@@ -603,6 +604,22 @@ func _on_sigil_corrupted() -> void:
 # ============================================
 
 func _setup_hud_connections() -> void:
+	# Try to find/create FpsHud first (new design)
+	var fps_hud: FpsHud = null
+
+	# Look for existing FpsHud
+	for child in get_children():
+		if child is FpsHud:
+			fps_hud = child
+			break
+
+	# If no FpsHud, create one dynamically
+	if not fps_hud:
+		fps_hud = FpsHud.new()
+		add_child(fps_hud)
+		print("[GameWorld] Created FpsHud dynamically")
+
+	# Connect hit confirmation for crosshair feedback
 	# Find HUD in scene - use untyped variable to avoid cast errors
 	var animated_hud = null
 
@@ -636,26 +653,13 @@ func _setup_hud_connections() -> void:
 	)
 
 	GameState.hit_confirmed.connect(func(peer_id: int, hit_data: Dictionary):
-		# Show hit marker for local player
 		var local_peer := multiplayer.get_unique_id()
 		if peer_id == local_peer:
-			var is_kill: bool = hit_data.get("target_type", "") == "zombie"
-			var is_headshot: bool = hit_data.get("is_headshot", false)
-			animated_hud.show_hit_marker(is_kill, is_headshot)
+			var is_kill: bool = hit_data.get("is_kill", false)
+			fps_hud.show_hit_marker(is_kill)
 	)
 
-	GameState.game_over.connect(func(reason: String, victory: bool):
-		# Could show game over UI here
-		print("[HUD] Game Over: %s (%s)" % [reason, "Victory" if victory else "Defeat"])
-	)
+	# FpsHud auto-updates from player state in _process(),
+	# so minimal signal connections needed
 
-	# Connect sigil signals to HUD
-	GameState.sigil_damaged.connect(func(damage: float, health: float, max_health: float):
-		animated_hud.update_sigil_health(health, max_health)
-	)
-
-	GameState.sigil_corrupted.connect(func(corruption_count: int):
-		animated_hud.on_sigil_corrupted()
-	)
-
-	print("[GameWorld] HUD connections established")
+	print("[GameWorld] FpsHud connections established")

@@ -145,8 +145,8 @@ func _update_bob(delta: float) -> void:
 	bob_time += delta * freq * velocity.length() * 0.5
 
 	# Calculate bob offset (figure-8 pattern)
-	var horizontal := sin(bob_time) * amp
-	var vertical := abs(cos(bob_time)) * amp * 0.5
+	var horizontal: float = sin(bob_time) * amp
+	var vertical: float = abs(cos(bob_time)) * amp * 0.5
 
 	bob_offset = Vector3(horizontal, vertical, 0)
 

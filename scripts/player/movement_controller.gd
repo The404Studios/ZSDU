@@ -52,6 +52,10 @@ var attribute_move_speed_mult: float = 1.0
 var attribute_sprint_speed_mult: float = 1.0
 var attribute_stamina_regen_mult: float = 1.0
 
+# Equipment multipliers (set by PlayerController from EquipmentRuntime)
+var equipment_speed_modifier: float = 1.0
+var equipment_stamina_modifier: float = 1.0
+
 # References
 var body: CharacterBody3D = null
 var collision_shape: CollisionShape3D = null
@@ -86,12 +90,12 @@ func process_input(input: PlayerInput, delta: float) -> void:
 
 	is_sprinting = can_sprint
 
-	# Get movement speed based on posture (with attribute bonus)
-	var speed := _get_movement_speed() * attribute_move_speed_mult
+	# Get movement speed based on posture (with attribute + equipment bonuses)
+	var speed := _get_movement_speed() * attribute_move_speed_mult * equipment_speed_modifier
 
-	# Apply sprint speed (with attribute bonus)
+	# Apply sprint speed (with attribute + equipment bonuses)
 	if is_sprinting:
-		speed = sprint_speed * attribute_sprint_speed_mult
+		speed = sprint_speed * attribute_sprint_speed_mult * equipment_speed_modifier
 
 	# Calculate desired velocity
 	desired_velocity = input.move_dir * speed
@@ -99,11 +103,11 @@ func process_input(input: PlayerInput, delta: float) -> void:
 	# Handle jump
 	wants_jump = input.jump and body.is_on_floor() and posture == PlayerState.Posture.STAND
 
-	# Stamina management
+	# Stamina management (equipment modifier affects drain: heavy armor = more drain)
 	if is_sprinting:
-		_drain_stamina(stamina_drain_sprint * delta)
+		_drain_stamina(stamina_drain_sprint * equipment_stamina_modifier * delta)
 	elif wants_jump:
-		_drain_stamina(stamina_drain_jump)
+		_drain_stamina(stamina_drain_jump * equipment_stamina_modifier)
 
 	# Stamina regeneration
 	_regenerate_stamina(delta)
