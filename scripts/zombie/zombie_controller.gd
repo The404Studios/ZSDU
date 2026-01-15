@@ -25,6 +25,10 @@ enum ZombieType {
 	RUNNER,      # Fast, weak
 	BRUTE,       # Slow, tanky, high damage
 	CRAWLER,     # Low, can fit under gaps
+	SPITTER,     # Ranged acid attack
+	SCREAMER,    # Calls more zombies when aggro
+	EXPLODER,    # Explodes on death or when near player
+	BOSS,        # Very tanky boss zombie
 }
 
 # Base stats (modified by type and wave)
@@ -152,18 +156,42 @@ func _apply_type_modifiers() -> void:
 			health = BASE_HEALTH
 			move_speed = BASE_SPEED
 			damage = BASE_DAMAGE
+			attack_cooldown = BASE_ATTACK_RATE
 		ZombieType.RUNNER:
 			health = BASE_HEALTH * 0.6
 			move_speed = BASE_SPEED * 2.0
 			damage = BASE_DAMAGE * 0.7
+			attack_cooldown = BASE_ATTACK_RATE * 0.7
 		ZombieType.BRUTE:
 			health = BASE_HEALTH * 3.0
 			move_speed = BASE_SPEED * 0.6
 			damage = BASE_DAMAGE * 2.5
+			attack_cooldown = BASE_ATTACK_RATE * 1.5
 		ZombieType.CRAWLER:
 			health = BASE_HEALTH * 0.8
 			move_speed = BASE_SPEED * 1.2
 			damage = BASE_DAMAGE * 0.8
+			attack_cooldown = BASE_ATTACK_RATE * 0.8
+		ZombieType.SPITTER:
+			health = BASE_HEALTH * 0.7
+			move_speed = BASE_SPEED * 0.9
+			damage = BASE_DAMAGE * 1.2  # Ranged damage
+			attack_cooldown = BASE_ATTACK_RATE * 2.0  # Slower attack
+		ZombieType.SCREAMER:
+			health = BASE_HEALTH * 0.5
+			move_speed = BASE_SPEED * 1.3
+			damage = BASE_DAMAGE * 0.5
+			attack_cooldown = BASE_ATTACK_RATE * 1.0
+		ZombieType.EXPLODER:
+			health = BASE_HEALTH * 0.8
+			move_speed = BASE_SPEED * 1.1
+			damage = BASE_DAMAGE * 3.0  # Explosion damage
+			attack_cooldown = 0.0  # Instant explosion
+		ZombieType.BOSS:
+			health = BASE_HEALTH * 10.0
+			move_speed = BASE_SPEED * 0.5
+			damage = BASE_DAMAGE * 4.0
+			attack_cooldown = BASE_ATTACK_RATE * 0.8
 
 	max_health = health
 
@@ -226,6 +254,10 @@ func _state_aggro(_delta: float) -> void:
 	if not is_instance_valid(target_player):
 		_change_state(ZombieState.IDLE)
 		return
+
+	# Screamer special: call for help when first aggroed
+	if zombie_type == ZombieType.SCREAMER and state_timer < 0.1:
+		_scream_for_help()
 
 	target_position = target_player.global_position
 	_change_state(ZombieState.PATH)
@@ -538,12 +570,131 @@ func _die() -> void:
 	current_state = ZombieState.DEAD
 	health = 0
 
+	# Special death behaviors
+	match zombie_type:
+		ZombieType.EXPLODER:
+			_explode_on_death()
+		ZombieType.SCREAMER:
+			# Already called zombies when aggroed
+			pass
+
+	# Drop loot
+	_drop_loot()
+
 	# Notify game state
 	GameState.kill_zombie(zombie_id)
 
 	# Play death animation, then remove
 	# For now, just queue free
 	queue_free()
+
+
+## Exploder special: explodes on death dealing AoE damage
+func _explode_on_death() -> void:
+	var explosion_radius := 4.0
+	var explosion_damage := damage  # Uses exploder's damage stat
+
+	# Find all players and zombies in radius
+	for peer_id in GameState.players:
+		var player: Node3D = GameState.players[peer_id]
+		if not is_instance_valid(player):
+			continue
+
+		var dist := global_position.distance_to(player.global_position)
+		if dist < explosion_radius:
+			# Damage falls off with distance
+			var falloff := 1.0 - (dist / explosion_radius)
+			var actual_damage := explosion_damage * falloff
+			if player.has_method("take_damage"):
+				player.take_damage(actual_damage, global_position)
+
+	# Broadcast explosion event for VFX
+	NetworkManager.broadcast_event.rpc("zombie_explode", {
+		"position": global_position,
+		"radius": explosion_radius
+	})
+
+
+## Screamer special: call nearby zombies to converge on player
+func _scream_for_help() -> void:
+	if not target_player:
+		return
+
+	var scream_radius := 20.0
+	var player_pos := target_player.global_position
+
+	# All zombies in radius target this player
+	for zid in GameState.zombies:
+		var zombie: ZombieController = GameState.zombies[zid]
+		if not is_instance_valid(zombie):
+			continue
+		if zombie == self:
+			continue
+
+		var dist := global_position.distance_to(zombie.global_position)
+		if dist < scream_radius:
+			zombie.target_player = target_player
+			zombie.target_position = player_pos
+			zombie._change_state(ZombieState.AGGRO)
+
+	# Broadcast scream event for audio
+	NetworkManager.broadcast_event.rpc("zombie_scream", {
+		"position": global_position
+	})
+
+
+## Drop loot on death
+func _drop_loot() -> void:
+	if not NetworkManager.is_authority():
+		return
+
+	# Calculate loot chance based on zombie type
+	var loot_chance := 0.1  # Base 10% chance
+	var gold_amount := 0
+	var xp_amount := 10
+
+	match zombie_type:
+		ZombieType.WALKER:
+			loot_chance = 0.08
+			gold_amount = randi_range(5, 15)
+			xp_amount = 10
+		ZombieType.RUNNER:
+			loot_chance = 0.10
+			gold_amount = randi_range(8, 20)
+			xp_amount = 15
+		ZombieType.BRUTE:
+			loot_chance = 0.25
+			gold_amount = randi_range(20, 50)
+			xp_amount = 35
+		ZombieType.CRAWLER:
+			loot_chance = 0.12
+			gold_amount = randi_range(10, 25)
+			xp_amount = 12
+		ZombieType.SPITTER:
+			loot_chance = 0.18
+			gold_amount = randi_range(15, 35)
+			xp_amount = 25
+		ZombieType.SCREAMER:
+			loot_chance = 0.20
+			gold_amount = randi_range(12, 30)
+			xp_amount = 20
+		ZombieType.EXPLODER:
+			loot_chance = 0.15
+			gold_amount = randi_range(18, 40)
+			xp_amount = 30
+		ZombieType.BOSS:
+			loot_chance = 1.0  # Always drop loot
+			gold_amount = randi_range(100, 250)
+			xp_amount = 150
+
+	# Broadcast loot drop event (handled by game world)
+	NetworkManager.broadcast_event.rpc("zombie_loot", {
+		"position": global_position,
+		"gold": gold_amount,
+		"xp": xp_amount,
+		"drop_item": randf() < loot_chance,
+		"zombie_type": zombie_type
+	})
 
 
 ## Get network state for snapshot
@@ -583,6 +734,10 @@ static func string_to_type(type_str: String) -> ZombieType:
 		"runner": return ZombieType.RUNNER
 		"brute": return ZombieType.BRUTE
 		"crawler": return ZombieType.CRAWLER
+		"spitter": return ZombieType.SPITTER
+		"screamer": return ZombieType.SCREAMER
+		"exploder": return ZombieType.EXPLODER
+		"boss": return ZombieType.BOSS
 	return ZombieType.WALKER
 
 
