@@ -954,9 +954,52 @@ func _build_wave_display() -> void:
 	wave_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	wave_container.add_child(wave_label)
 
-	# Connect to GameState wave signal
+	# Connect to GameState wave signal (basic)
 	if GameState:
-		GameState.wave_started.connect(_on_wave_started)
+		GameState.wave_started.connect(_on_wave_started_basic)
+
+	# Connect to network events for boss wave info
+	if NetworkManager and NetworkManager.has_signal("event_received"):
+		NetworkManager.event_received.connect(_on_network_event)
+
+
+func _on_network_event(event_name: String, data: Dictionary) -> void:
+	match event_name:
+		"wave_start":
+			var wave_num: int = data.get("wave", 1)
+			var is_boss: bool = data.get("is_boss_wave", false)
+			_on_wave_started(wave_num, is_boss)
+		"zombie_loot":
+			# Handle loot drop display (XP popup)
+			var xp: int = data.get("xp", 0)
+			var zombie_type: int = data.get("zombie_type", 0)
+			if xp > 0:
+				var type_name := _zombie_type_to_name(zombie_type)
+				show_xp_popup(xp, type_name)
+		"zombie_explode":
+			# Could add screen shake here
+			pass
+
+
+func _zombie_type_to_name(type: int) -> String:
+	match type:
+		0: return "Walker"
+		1: return "Runner"
+		2: return "Brute"
+		3: return "Crawler"
+		4: return "Spitter"
+		5: return "Screamer"
+		6: return "Exploder"
+		7: return "Boss"
+	return ""
+
+
+func _on_wave_started_basic(wave_number: int) -> void:
+	# Fallback for when network event isn't available
+	# Check if already handled by network event
+	if current_wave == wave_number:
+		return
+	_on_wave_started(wave_number, false)
 
 
 func _on_wave_started(wave_number: int, is_boss_wave: bool = false) -> void:
