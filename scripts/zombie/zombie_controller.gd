@@ -57,13 +57,14 @@ var target_nail_id: int = -1
 var target_position := Vector3.ZERO
 var target_direction := Vector3.FORWARD  # Direction toward sigil
 
-# Navigation (simplified - mostly moves toward sigil)
+# Navigation (navmesh-based pathfinding)
 var nav_agent: NavigationAgent3D = null
 var path_update_timer: float = 0.0
-const PATH_UPDATE_INTERVAL := 0.5  # Don't re-path every frame
+const PATH_UPDATE_INTERVAL := 0.25  # Faster path updates for better responsiveness
 
-# Pressure tube mode - zombies just move forward
-var use_directional_movement := true  # Enable simplified movement
+# Navigation mode
+var use_navmesh_pathfinding := true  # Use navmesh when available
+var nav_path_failed := false  # Fall back to direct movement if navmesh fails
 
 # Attack state
 var attack_timer: float = 0.0
@@ -89,10 +90,18 @@ func _ready() -> void:
 		nav_agent.name = "NavigationAgent3D"
 		add_child(nav_agent)
 
-	# Configure navigation
+	# Configure navigation agent for better pathfinding
 	nav_agent.path_desired_distance = 0.5
 	nav_agent.target_desired_distance = 1.0
 	nav_agent.avoidance_enabled = true
+	nav_agent.radius = 0.35
+	nav_agent.neighbor_distance = 3.0
+	nav_agent.max_neighbors = 5
+	nav_agent.path_max_distance = 50.0  # Re-path if distance changes significantly
+
+	# Connect navigation signals
+	nav_agent.path_changed.connect(_on_nav_path_changed)
+	nav_agent.navigation_finished.connect(_on_nav_finished)
 
 	# Apply type modifiers
 	_apply_type_modifiers()
@@ -222,16 +231,16 @@ func _state_aggro(_delta: float) -> void:
 	_change_state(ZombieState.PATH)
 
 
-## PATH - Move toward target (simplified directional movement)
+## PATH - Move toward target using navmesh pathfinding with barricade awareness
 func _state_path(delta: float) -> void:
-	# Always check for nearby nails (barricade detection)
+	# Priority 1: Check for nearby nails to attack (immediate barricade threat)
 	var nearby_nail := GameState.get_nearest_nail(global_position, 2.5)
 	if nearby_nail >= 0:
 		target_nail_id = nearby_nail
 		_change_state(ZombieState.ATTACK_NAIL)
 		return
 
-	# Check for blocking barricades via raycast (less frequently)
+	# Priority 2: Check for blocking barricades via raycast (periodic check)
 	if path_update_timer >= PATH_UPDATE_INTERVAL:
 		path_update_timer = 0.0
 
@@ -241,7 +250,7 @@ func _state_path(delta: float) -> void:
 			_change_state(ZombieState.ATTACK_NAIL)
 			return
 
-		# Check if player is nearby and closer than sigil
+		# Check if player is nearby and should chase
 		_find_target()
 		if target_player:
 			var player_dist := global_position.distance_to(target_player.global_position)
@@ -249,23 +258,12 @@ func _state_path(delta: float) -> void:
 				_change_state(ZombieState.AGGRO)
 				return
 
-	# Use directional movement (pressure tube model)
-	var direction: Vector3
-	if use_directional_movement:
-		# Just move toward target (sigil)
-		direction = global_position.direction_to(target_position)
-		direction.y = 0
-		direction = direction.normalized()
-	else:
-		# Use navmesh if available
-		if nav_agent:
+		# Update navmesh target if using navmesh
+		if use_navmesh_pathfinding and nav_agent:
 			nav_agent.target_position = target_position
-			var next_pos := nav_agent.get_next_path_position()
-			direction = global_position.direction_to(next_pos)
-			direction.y = 0
-			direction = direction.normalized()
-		else:
-			direction = target_direction
+
+	# Calculate movement direction
+	var direction := _get_movement_direction()
 
 	# Check if reached target (sigil area)
 	var dist_to_target := global_position.distance_to(target_position)
@@ -275,17 +273,60 @@ func _state_path(delta: float) -> void:
 		velocity.z = 0
 		return
 
-	# Apply group offset if following leader
+	# Apply group offset if following leader (horde behavior)
 	if group_leader and is_instance_valid(group_leader):
 		direction = (direction + group_offset * 0.3).normalized()
 
 	velocity.x = direction.x * move_speed
 	velocity.z = direction.z * move_speed
 
-	# Face movement direction
+	# Face movement direction smoothly
 	if direction.length() > 0.1:
 		var target_angle := atan2(direction.x, direction.z)
 		rotation.y = lerp_angle(rotation.y, target_angle, 10.0 * delta)
+
+
+## Get movement direction using navmesh or fallback to direct movement
+func _get_movement_direction() -> Vector3:
+	var direction: Vector3
+
+	# Try navmesh pathfinding first
+	if use_navmesh_pathfinding and nav_agent and not nav_path_failed:
+		if nav_agent.is_navigation_finished():
+			# Reached target via navmesh
+			return Vector3.ZERO
+
+		var next_pos := nav_agent.get_next_path_position()
+		direction = global_position.direction_to(next_pos)
+		direction.y = 0
+
+		# Check if we're stuck (velocity is very low but not at target)
+		if direction.length() < 0.01:
+			# Navmesh might be blocked, use direct movement temporarily
+			nav_path_failed = true
+			direction = global_position.direction_to(target_position)
+			direction.y = 0
+	else:
+		# Direct movement toward target (fallback)
+		direction = global_position.direction_to(target_position)
+		direction.y = 0
+
+		# Reset navmesh failure after a short delay
+		if nav_path_failed:
+			nav_path_failed = false
+
+	return direction.normalized() if direction.length() > 0.01 else Vector3.ZERO
+
+
+## Called when navigation path changes
+func _on_nav_path_changed() -> void:
+	nav_path_failed = false  # New path available, reset failure flag
+
+
+## Called when navigation target is reached
+func _on_nav_finished() -> void:
+	# At destination - could transition to attack or idle
+	pass
 
 
 ## ATTACK_PLAYER - Melee attack player
