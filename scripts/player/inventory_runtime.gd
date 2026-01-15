@@ -238,8 +238,8 @@ func pickup_loot(def_id: String, stack: int = 1, durability: float = 1.0, mods: 
 	if RaidManager and NetworkManager and NetworkManager.is_authority():
 		var parent := get_parent()
 		if parent:
-			var peer_id := parent.get("peer_id")
-			if peer_id:
+			var peer_id: int = parent.get("peer_id") if parent.get("peer_id") else 0
+			if peer_id > 0:
 				RaidManager.add_provisional_loot(peer_id, def_id, stack, durability, mods)
 
 	return true

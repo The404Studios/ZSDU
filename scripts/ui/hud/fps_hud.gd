@@ -1115,6 +1115,15 @@ func _on_network_event(event_name: String, data: Dictionary) -> void:
 		"extraction_cancelled":
 			# Hide extraction UI
 			_hide_extraction_ui()
+		"zombie_spit":
+			# Spitter launched acid projectile - visual only on client
+			pass  # TODO: Spawn visual projectile effect
+		"zombie_spit_hit":
+			# Acid hit a player - show acid screen effect if local player
+			var target_peer: int = data.get("target_peer", 0)
+			var local_peer := multiplayer.get_unique_id() if multiplayer else 0
+			if target_peer == local_peer:
+				_show_acid_hit_effect()
 
 
 func _zombie_type_to_name(type: int) -> String:
@@ -2126,7 +2135,7 @@ func _show_scream_alert() -> void:
 	var alert := Label.new()
 	alert.text = "SCREAMER ALERT!"
 	alert.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	alert.set_anchors_preset(Control.PRESET_TOP_CENTER)
+	alert.set_anchors_preset(Control.PRESET_CENTER_TOP)
 	alert.position = Vector2(-150, 120)
 	alert.size = Vector2(300, 30)
 	alert.add_theme_font_size_override("font_size", 18)
@@ -2146,3 +2155,25 @@ func _show_scream_alert() -> void:
 	tween.tween_interval(1.0)
 	tween.tween_property(alert, "modulate:a", 0.0, 0.3)
 	tween.tween_callback(alert.queue_free)
+
+
+## Show acid hit screen effect (green tinge and damage indicators)
+func _show_acid_hit_effect() -> void:
+	# Create green acid overlay
+	var acid_overlay := ColorRect.new()
+	acid_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	acid_overlay.color = Color(0.2, 0.7, 0.1, 0.0)
+	acid_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	root.add_child(acid_overlay)
+
+	# Flash green then fade
+	var tween := acid_overlay.create_tween()
+	tween.tween_property(acid_overlay, "color:a", 0.35, 0.1)
+	tween.tween_property(acid_overlay, "color:a", 0.0, 0.8)
+	tween.tween_callback(acid_overlay.queue_free)
+
+	# Also show all-direction damage (acid splatter feel)
+	show_damage_all_directions()
+
+	# Small screen shake
+	_do_screen_shake(0.15, 4.0)
