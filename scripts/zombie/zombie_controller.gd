@@ -767,52 +767,75 @@ func _drop_loot() -> void:
 	if not NetworkManager.is_authority():
 		return
 
-	# Calculate loot chance based on zombie type
-	var loot_chance := 0.1  # Base 10% chance
+	# Get current wave for loot scaling
+	var current_wave := 1
+	if GameState:
+		current_wave = GameState.current_wave if "current_wave" in GameState else 1
+
+	# Calculate gold and XP based on zombie type
 	var gold_amount := 0
 	var xp_amount := 10
 
 	match zombie_type:
 		ZombieType.WALKER:
-			loot_chance = 0.08
 			gold_amount = randi_range(5, 15)
 			xp_amount = 10
 		ZombieType.RUNNER:
-			loot_chance = 0.10
 			gold_amount = randi_range(8, 20)
 			xp_amount = 15
 		ZombieType.BRUTE:
-			loot_chance = 0.25
 			gold_amount = randi_range(20, 50)
 			xp_amount = 35
 		ZombieType.CRAWLER:
-			loot_chance = 0.12
 			gold_amount = randi_range(10, 25)
 			xp_amount = 12
 		ZombieType.SPITTER:
-			loot_chance = 0.18
 			gold_amount = randi_range(15, 35)
 			xp_amount = 25
 		ZombieType.SCREAMER:
-			loot_chance = 0.20
 			gold_amount = randi_range(12, 30)
 			xp_amount = 20
 		ZombieType.EXPLODER:
-			loot_chance = 0.15
 			gold_amount = randi_range(18, 40)
 			xp_amount = 30
 		ZombieType.BOSS:
-			loot_chance = 1.0  # Always drop loot
 			gold_amount = randi_range(100, 250)
 			xp_amount = 150
 
-	# Broadcast loot drop event (handled by game world)
+	# Generate procedural loot using LootGenerator
+	var dropped_items: Array = []
+	if LootGenerator:
+		var loot_drops: Array = LootGenerator.generate_zombie_loot(zombie_type, current_wave, 0.0)
+		for loot_item in loot_drops:
+			# Spawn actual loot pickup in world
+			if EntityRegistry:
+				var drop_pos := global_position + Vector3(randf_range(-0.5, 0.5), 0.3, randf_range(-0.5, 0.5))
+				var mods_array: Array = []
+				if "modifiers" in loot_item:
+					mods_array = loot_item.modifiers
+				elif "effects" in loot_item:
+					mods_array = loot_item.effects
+				EntityRegistry.spawn_loot_drop(
+					drop_pos,
+					loot_item.def_id,
+					loot_item.get("stack", 1),
+					loot_item.get("durability", 1.0),
+					mods_array
+				)
+				dropped_items.append({
+					"def_id": loot_item.def_id,
+					"name": loot_item.name,
+					"rarity": loot_item.rarity,
+					"type": loot_item.type
+				})
+
+	# Broadcast loot drop event for HUD feedback
 	NetworkManager.broadcast_event.rpc("zombie_loot", {
 		"position": global_position,
 		"gold": gold_amount,
 		"xp": xp_amount,
-		"drop_item": randf() < loot_chance,
-		"zombie_type": zombie_type
+		"zombie_type": zombie_type,
+		"items": dropped_items
 	})
 
 

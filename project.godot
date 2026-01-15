@@ -33,6 +33,7 @@ CryptoUtils="*res://scripts/autoload/crypto_utils.gd"
 RaidManager="*res://scripts/autoload/raid_manager.gd"
 EntityRegistry="*res://scripts/autoload/entity_registry.gd"
 GameDirector="*res://scripts/autoload/game_director.gd"
+LootGenerator="*res://scripts/autoload/loot_generator.gd"
 NetworkDebug="*res://scripts/debug/network_debug.gd"
 
 [display]

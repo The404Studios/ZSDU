@@ -227,26 +227,78 @@ func _build_mini_map() -> void:
 
 func _build_buffs() -> void:
 	buffs_container = HBoxContainer.new()
-	buffs_container.position = Vector2(105, 20)
-	buffs_container.add_theme_constant_override("separation", 5)
+	buffs_container.position = Vector2(105, 10)
+	buffs_container.add_theme_constant_override("separation", 6)
 	buffs_container.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	bottom_left_container.add_child(buffs_container)
 
 	# Label
 	var label := Label.new()
-	label.text = "- BUFFS"
-	label.add_theme_font_size_override("font_size", 11)
-	label.add_theme_color_override("font_color", Color(0.6, 0.6, 0.65))
+	label.text = "BUFFS"
+	label.add_theme_font_size_override("font_size", 10)
+	label.add_theme_color_override("font_color", Color(0.5, 0.5, 0.55))
 	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	buffs_container.add_child(label)
 
-	# Create buff slot placeholders
-	for i in range(3):
-		var slot := ColorRect.new()
-		slot.custom_minimum_size = Vector2(24, 24)
-		slot.color = Color(0.15, 0.15, 0.18, 0.7)
-		slot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	# Create 5 buff slot placeholders with timer rings
+	for i in range(5):
+		var slot := _create_buff_slot()
 		buffs_container.add_child(slot)
+
+
+func _create_buff_slot() -> Control:
+	# Container for buff icon + timer ring
+	var container := Control.new()
+	container.custom_minimum_size = Vector2(32, 32)
+	container.mouse_filter = Control.MOUSE_FILTER_PASS
+
+	# Background circle (dark)
+	var bg := ColorRect.new()
+	bg.position = Vector2(2, 2)
+	bg.size = Vector2(28, 28)
+	bg.color = Color(0.12, 0.12, 0.14, 0.8)
+	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	container.add_child(bg)
+
+	# Icon (center)
+	var icon := ColorRect.new()
+	icon.name = "Icon"
+	icon.position = Vector2(6, 6)
+	icon.size = Vector2(20, 20)
+	icon.color = Color(0.2, 0.2, 0.22, 0.5)
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	container.add_child(icon)
+
+	# Timer label overlay
+	var timer_label := Label.new()
+	timer_label.name = "Timer"
+	timer_label.set_anchors_preset(Control.PRESET_CENTER)
+	timer_label.position = Vector2(0, 8)
+	timer_label.size = Vector2(32, 16)
+	timer_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	timer_label.add_theme_font_size_override("font_size", 9)
+	timer_label.add_theme_color_override("font_color", Color.WHITE)
+	timer_label.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.9))
+	timer_label.add_theme_constant_override("shadow_offset_x", 1)
+	timer_label.add_theme_constant_override("shadow_offset_y", 1)
+	timer_label.text = ""
+	timer_label.visible = false
+	timer_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	container.add_child(timer_label)
+
+	# Buff name tooltip (initially hidden)
+	var tooltip := Label.new()
+	tooltip.name = "Tooltip"
+	tooltip.position = Vector2(-10, -20)
+	tooltip.size = Vector2(52, 18)
+	tooltip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	tooltip.add_theme_font_size_override("font_size", 10)
+	tooltip.add_theme_color_override("font_color", Color.WHITE)
+	tooltip.visible = false
+	tooltip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	container.add_child(tooltip)
+
+	return container
 
 
 func _build_stamina_bar() -> void:
@@ -756,32 +808,127 @@ func set_weapon_slot(slot: int) -> void:
 	_set_active_weapon_slot(slot)
 
 
-func add_buff(buff_id: String, icon_color: Color, duration: float) -> void:
-	# Find empty buff slot or replace oldest
+func add_buff(buff_id: String, icon_color: Color, duration: float, buff_name: String = "") -> void:
+	# Check if buff already exists (refresh it)
+	for i in range(active_buffs.size()):
+		if active_buffs[i].id == buff_id:
+			active_buffs[i].expires = Time.get_ticks_msec() / 1000.0 + duration
+			active_buffs[i].duration = duration
+			_update_buff_visuals()
+			return
+
+	# Find empty slot or replace oldest
 	var slot_idx := active_buffs.size()
-	if slot_idx >= 3:
-		slot_idx = 0  # Replace first
+	if slot_idx >= 5:
+		# Find oldest buff to replace
+		var oldest_idx := 0
+		var oldest_time := active_buffs[0].expires
+		for i in range(1, active_buffs.size()):
+			if active_buffs[i].expires < oldest_time:
+				oldest_time = active_buffs[i].expires
+				oldest_idx = i
+		slot_idx = oldest_idx
 
-	# Add buff to tracking
+	var buff_data := {
+		"id": buff_id,
+		"name": buff_name if buff_name != "" else buff_id.capitalize(),
+		"color": icon_color,
+		"expires": Time.get_ticks_msec() / 1000.0 + duration,
+		"duration": duration,
+		"slot": slot_idx
+	}
+
+	# Add or replace buff
 	if slot_idx < active_buffs.size():
-		active_buffs[slot_idx] = {"id": buff_id, "color": icon_color, "expires": Time.get_ticks_msec() / 1000.0 + duration}
+		active_buffs[slot_idx] = buff_data
 	else:
-		active_buffs.append({"id": buff_id, "color": icon_color, "expires": Time.get_ticks_msec() / 1000.0 + duration})
+		active_buffs.append(buff_data)
 
-	# Update visual
+	# Animate buff appearing
+	_animate_buff_added(slot_idx)
 	_update_buff_visuals()
 
 
+func _animate_buff_added(slot_idx: int) -> void:
+	var slot := _get_buff_slot(slot_idx)
+	if not slot:
+		return
+
+	# Pop-in animation
+	slot.scale = Vector2(0.5, 0.5)
+	slot.modulate.a = 0
+
+	var tween := slot.create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(slot, "scale", Vector2(1.0, 1.0), 0.2).set_trans(Tween.TRANS_BACK)
+	tween.tween_property(slot, "modulate:a", 1.0, 0.15)
+
+
+func _get_buff_slot(idx: int) -> Control:
+	# Skip first child (label), get actual slot
+	var slot_child_idx := idx + 1
+	if slot_child_idx < buffs_container.get_child_count():
+		return buffs_container.get_child(slot_child_idx) as Control
+	return null
+
+
 func _update_buff_visuals() -> void:
-	# Get buff slot ColorRects (skip first child which is the label)
-	var idx := 0
-	for i in range(1, buffs_container.get_child_count()):
-		var slot := buffs_container.get_child(i) as ColorRect
-		if slot and idx < active_buffs.size():
-			slot.color = active_buffs[idx].color
-			idx += 1
-		elif slot:
-			slot.color = Color(0.15, 0.15, 0.18, 0.7)
+	var current_time := Time.get_ticks_msec() / 1000.0
+
+	# Update each buff slot
+	for i in range(5):
+		var slot := _get_buff_slot(i)
+		if not slot:
+			continue
+
+		var icon := slot.get_node_or_null("Icon") as ColorRect
+		var timer := slot.get_node_or_null("Timer") as Label
+		var tooltip := slot.get_node_or_null("Tooltip") as Label
+
+		# Find buff data for this slot
+		var buff_data: Dictionary = {}
+		for buff in active_buffs:
+			if buff.slot == i:
+				buff_data = buff
+				break
+
+		if buff_data.is_empty():
+			# Empty slot
+			if icon:
+				icon.color = Color(0.2, 0.2, 0.22, 0.5)
+			if timer:
+				timer.visible = false
+			if tooltip:
+				tooltip.visible = false
+			slot.modulate.a = 0.4
+		else:
+			# Active buff
+			if icon:
+				icon.color = buff_data.color
+			slot.modulate.a = 1.0
+
+			# Update timer display
+			var time_left: float = buff_data.expires - current_time
+			if timer:
+				if time_left <= 10:
+					timer.visible = true
+					timer.text = "%ds" % int(ceil(time_left))
+					# Pulse when low time
+					if time_left <= 3:
+						timer.add_theme_color_override("font_color", Color(1, 0.3, 0.2))
+					else:
+						timer.add_theme_color_override("font_color", Color(1, 0.8, 0.2))
+				else:
+					timer.visible = false
+
+			# Tooltip (always shows buff name on hover - just set text)
+			if tooltip:
+				tooltip.text = buff_data.name
+
+			# Pulsing effect when expiring soon
+			if time_left <= 5 and time_left > 0:
+				var pulse := (sin(current_time * 6) + 1) / 2
+				slot.modulate = Color(1 + pulse * 0.3, 1, 1, 1)
 
 
 func _flash_damage() -> void:
@@ -829,21 +976,39 @@ func connect_to_attribute_system(attr_sys: AttributeSystem) -> void:
 
 
 func _on_attribute_buff_applied(buff_id: String, attribute: String, _amount: int) -> void:
-	# Map attribute to color
+	# Map attribute to color and name
 	var color := Color(0.3, 0.8, 0.3)  # Default green
+	var buff_name := buff_id
 	match attribute:
 		"Strength":
 			color = Color(0.9, 0.3, 0.3)  # Red
+			buff_name = "STR+"
 		"Agility":
 			color = Color(0.3, 0.9, 0.3)  # Green
+			buff_name = "AGI+"
 		"Endurance":
 			color = Color(0.9, 0.6, 0.2)  # Orange
+			buff_name = "END+"
 		"Intellect":
 			color = Color(0.3, 0.5, 0.9)  # Blue
+			buff_name = "INT+"
 		"Luck":
 			color = Color(0.9, 0.8, 0.2)  # Gold
+			buff_name = "LCK+"
+		"damage":
+			color = Color(1.0, 0.4, 0.3)  # Bright red
+			buff_name = "DMG+"
+		"speed":
+			color = Color(0.4, 0.9, 1.0)  # Cyan
+			buff_name = "SPD+"
+		"defense":
+			color = Color(0.5, 0.5, 0.8)  # Purple
+			buff_name = "DEF+"
+		"regen":
+			color = Color(0.3, 1.0, 0.5)  # Bright green
+			buff_name = "REGEN"
 
-	add_buff(buff_id, color, 30.0)  # Default 30s display
+	add_buff(buff_id, color, 30.0, buff_name)  # Default 30s display
 
 
 func _on_attribute_buff_expired(buff_id: String) -> void:
@@ -853,9 +1018,29 @@ func _on_attribute_buff_expired(buff_id: String) -> void:
 func remove_buff(buff_id: String) -> void:
 	for i in range(active_buffs.size() - 1, -1, -1):
 		if active_buffs[i].id == buff_id:
+			# Animate removal
+			var slot_idx: int = active_buffs[i].slot
+			_animate_buff_removed(slot_idx)
 			active_buffs.remove_at(i)
 			break
 	_update_buff_visuals()
+
+
+func _animate_buff_removed(slot_idx: int) -> void:
+	var slot := _get_buff_slot(slot_idx)
+	if not slot:
+		return
+
+	# Fade-out and shrink animation
+	var tween := slot.create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(slot, "scale", Vector2(0.3, 0.3), 0.15)
+	tween.tween_property(slot, "modulate:a", 0.0, 0.15)
+	tween.set_parallel(false)
+	tween.tween_callback(func():
+		slot.scale = Vector2(1, 1)
+		slot.modulate.a = 0.4
+	)
 
 
 ## Update buff timers (called each frame to expire old buffs)
@@ -865,11 +1050,13 @@ func _update_buffs() -> void:
 
 	for i in range(active_buffs.size() - 1, -1, -1):
 		if active_buffs[i].expires <= current_time:
+			var slot_idx: int = active_buffs[i].slot
+			_animate_buff_removed(slot_idx)
 			active_buffs.remove_at(i)
 			changed = true
 
-	if changed:
-		_update_buff_visuals()
+	# Always update visuals to refresh timers
+	_update_buff_visuals()
 
 
 # ============================================
